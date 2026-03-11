@@ -1,0 +1,76 @@
+# Infrastructure: Terraform plan on PR (with comment), apply on push to main.
+# Path filter: registry/infra. Manual run: workflow_dispatch.
+
+name: Infrastructure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "registry/infra/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "registry/infra/**"
+  workflow_dispatch:
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/hivemind-registry-deploy
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+      - run: cd registry/infra && terraform init
+      - run: cd registry/infra && terraform validate
+      - run: cd registry/infra && terraform plan -no-color -out=tfplan
+      - id: plan_show
+        run: |
+          cd registry/infra && terraform show -no-color tfplan > plan.txt
+          echo "plan<<PLANEOF" >> $GITHUB_OUTPUT
+          cat plan.txt >> $GITHUB_OUTPUT
+          echo "PLANEOF" >> $GITHUB_OUTPUT
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const plan = `${{ steps.plan_show.outputs.plan }}`;
+            const body = `#### Terraform Plan 📖
+            \`\`\`terraform
+            ${plan.length > 60000 ? plan.slice(0, 60000) + '\n... (truncated)' : plan}
+            \`\`\`
+            **Pusher:** @${{ github.actor }}
+            **Branch:** \`${{ github.head_ref }}\``;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+        continue-on-error: true
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/hivemind-registry-deploy
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+      - run: cd registry/infra && terraform init
+      - run: cd registry/infra && terraform apply -auto-approve

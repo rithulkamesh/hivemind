@@ -1,0 +1,85 @@
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Button } from "@/components/ui/button";
+
+const schema = z.object({
+  name: z.string().min(1, "Name required"),
+  scopes: z.array(z.enum(["read", "publish", "delete", "admin"])).min(1, "Select at least one scope"),
+  expires_days: z.number().int().min(0).optional(),
+});
+
+type FormData = z.infer<typeof schema>;
+
+const SCOPE_OPTIONS = [
+  { value: "read", label: "Read" },
+  { value: "publish", label: "Publish" },
+  { value: "delete", label: "Delete" },
+  { value: "admin", label: "Admin" },
+] as const;
+
+interface ApiKeyFormProps {
+  onSubmit: (data: FormData) => Promise<{ key: string; prefix: string } | void>;
+  onCancel?: () => void;
+}
+
+export function ApiKeyForm({ onSubmit, onCancel }: ApiKeyFormProps) {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: { name: "", scopes: [], expires_days: undefined },
+  });
+
+  return (
+    <form
+      className="space-y-4 max-w-md"
+      onSubmit={handleSubmit(async (data) => {
+        await onSubmit(data);
+      })}
+    >
+      <div>
+        <label className="block font-mono text-xs text-hm-muted mb-1">Name</label>
+        <input
+          {...register("name")}
+          className="w-full bg-hm-surface border border-hm-border px-3 py-2 font-sans text-sm text-hm-text focus:outline-none focus:border-hm-muted"
+          placeholder="e.g. CI deploy"
+        />
+        {errors.name && <p className="mt-1 text-sm text-red-400">{errors.name.message}</p>}
+      </div>
+      <div>
+        <label className="block font-mono text-xs text-hm-muted mb-2">Scopes</label>
+        <div className="flex flex-wrap gap-3">
+          {SCOPE_OPTIONS.map(({ value, label }) => (
+            <label key={value} className="flex items-center gap-2 text-sm text-hm-text-passive">
+              <input type="checkbox" value={value} {...register("scopes")} className="rounded border-hm-border" />
+              {label}
+            </label>
+          ))}
+        </div>
+        {errors.scopes && <p className="mt-1 text-sm text-red-400">{errors.scopes.message}</p>}
+      </div>
+      <div>
+        <label className="block font-mono text-xs text-hm-muted mb-1">Expires (days, optional)</label>
+        <input
+          type="number"
+          min={0}
+          {...register("expires_days", { valueAsNumber: true })}
+          className="w-full bg-hm-surface border border-hm-border px-3 py-2 font-sans text-sm text-hm-text focus:outline-none focus:border-hm-muted"
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Creating…" : "Create key"}
+        </Button>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+      </div>
+    </form>
+  );
+}

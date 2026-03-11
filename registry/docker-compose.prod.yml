@@ -1,0 +1,61 @@
+# Production stack: Postgres, API, Web (nginx serving static).
+# Set env vars (e.g. DATABASE_URL, JWT_SECRET) in .env or override.
+# Build and run: docker compose -f registry/docker-compose.prod.yml --env-file registry/.env.prod up -d
+# Or build images first: docker compose -f registry/docker-compose.prod.yml build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-registry}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-hivemind_registry}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-registry} -d ${POSTGRES_DB:-hivemind_registry}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: api
+      dockerfile: Dockerfile
+    image: hivemind-registry-api:latest
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-registry}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hivemind_registry}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      PORT: "8080"
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      SES_REGION: ${SES_REGION:-}
+      SES_FROM_ADDRESS: ${SES_FROM_ADDRESS:-}
+      BASE_URL: ${BASE_URL:-https://registry.hivemind.rithul.dev}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-100}
+      VERIFICATION_WORKERS: ${VERIFICATION_WORKERS:-4}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://registry.hivemind.rithul.dev}
+        VITE_REGISTRY_URL: ${VITE_REGISTRY_URL:-https://registry.hivemind.rithul.dev/simple/}
+    image: hivemind-registry-web:latest
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

@@ -1,0 +1,7 @@
+Verify your email
+
+Click the link below to verify your Hivemind Registry account (expires in 24 hours):
+
+{{.Link}}
+
+— Hivemind Registry · registry.hivemind.rithul.dev · Unsubscribe

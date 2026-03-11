@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars and set values.
+
+aws_region      = "us-east-1"
+environment     = "production"
+domain          = "hivemind.rithul.dev"
+registry_fqdn   = "registry.hivemind.rithul.dev"
+packages_fqdn   = "packages.hivemind.rithul.dev"
+
+# CIDR blocks allowed to SSH (e.g. your office IP)
+ssh_allowed_cidrs = ["1.2.3.4/32"]
+
+# Leave null to create a new key pair (private key in output; add to GitHub REGISTRY_DEPLOY_KEY)
+key_pair_name   = null
+create_key_pair = true
+
+github_org_repo = "rithulkamesh/hivemind"
+github_branch   = "main"
+
+# Optional: if Route53 zone already exists elsewhere, pass its ID
+# route53_zone_id = "Z0123456789ABCDEF"
+
+# Optional: if ACM cert is created manually, pass its ARN (must be us-east-1)
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+
+ecr_api_repository_name = "hivemind-registry-api"
+s3_packages_bucket      = "hivemind-registry-packages"
+ses_config_set          = "hivemind-registry"

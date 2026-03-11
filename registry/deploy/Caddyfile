@@ -1,0 +1,38 @@
+# Caddyfile for registry.hivemind.rithul.dev
+# Reverse-proxy API paths; serve React static for everything else.
+
+registry.hivemind.rithul.dev {
+    handle /api/* {
+        reverse_proxy api:8080
+    }
+    handle /auth/* {
+        reverse_proxy api:8080
+    }
+    handle /simple/* {
+        reverse_proxy api:8080
+    }
+    handle /health {
+        reverse_proxy api:8080
+    }
+    handle /ready {
+        reverse_proxy api:8080
+    }
+    handle {
+        root * /srv/web
+        try_files {path} /index.html
+        file_server
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubdomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com"
+    }
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}

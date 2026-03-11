@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS audit_log;
+DROP TABLE IF EXISTS download_events;
+DROP TABLE IF EXISTS docker_images;
+DROP TABLE IF EXISTS package_files;
+DROP TABLE IF EXISTS package_versions;
+DROP TABLE IF EXISTS packages;
+DROP TABLE IF EXISTS api_keys;
+DROP TABLE IF EXISTS org_members;
+DROP TABLE IF EXISTS organizations;
+DROP TABLE IF EXISTS oauth_identities;
+DROP TABLE IF EXISTS users;
