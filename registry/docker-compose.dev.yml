@@ -1,6 +1,7 @@
-# Dev stack: Postgres, API (hot reload with Air), Web (Vite dev server).
-# From repo root: docker compose -f registry/docker-compose.dev.yml up
-# API: http://localhost:8080  Web: http://localhost:5173 (proxies /api, /auth, /simple to API)
+# Dev stack: Postgres, API, Web (Vite + Better Auth in same process).
+# From registry/: docker compose -f docker-compose.dev.yml up  (or: just dev-docker)
+# With just: cd registry && just dev  runs API+web on host with .env loaded.
+# API: http://localhost:8080  Web: http://localhost:3000 (serves app + /auth)
 
 services:
   postgres:
@@ -17,6 +18,12 @@ services:
       timeout: 5s
       retries: 5
 
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"  # Web UI
+
   api:
     build:
       context: api
@@ -25,17 +32,24 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgresql://registry:registry@postgres:5432/hivemind_registry?sslmode=disable
-      JWT_SECRET: dev-secret-change-in-prod-min-32-bytes
+      JWKS_URL: http://web:3000/auth/jwks
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
       PORT: "8080"
+      BASE_URL: http://localhost:8080
       RATE_LIMIT_RPS: "100"
       MAX_UPLOAD_SIZE_MB: "100"
       VERIFICATION_WORKERS: "2"
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+      SMTP_FROM: noreply@registry.local
     volumes:
       - ./api:/app
       - api-tmp:/app/tmp
     depends_on:
       postgres:
         condition: service_healthy
+      mailhog:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
       interval: 3s
@@ -44,15 +58,24 @@ services:
       start_period: 15s
 
   web:
-    image: node:20-alpine
+    image: oven/bun:1-alpine
     working_dir: /app
-    command: sh -c "npm ci && npx vite --host 0.0.0.0"
+    command: sh -c "bun install && bun run dev"
     ports:
-      - "5173:5173"
+      - "3000:3000"
     environment:
+      DATABASE_URL: postgresql://registry:registry@postgres:5432/hivemind_registry?sslmode=disable
+      GO_API_INTERNAL_URL: http://api:8080
+      INTERNAL_SECRET: ${INTERNAL_SECRET:-dev-internal-secret}
+      FRONTEND_URL: http://localhost:3000
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       VITE_PROXY_TARGET: http://api:8080
       VITE_API_BASE_URL: ""
-      VITE_REGISTRY_URL: http://localhost:5173/simple/
+      VITE_REGISTRY_URL: http://localhost:3000/simple/
+      VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     volumes:
       - ./web:/app
     depends_on:

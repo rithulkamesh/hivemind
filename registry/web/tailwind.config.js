@@ -10,6 +10,7 @@ export default {
           border: "#1f1f1f",
           muted: "#666666",
           "muted-light": "#555555",
+          error: "#ef4444",
           text: "#fafafa",
           "text-passive": "#e8e8e8",
           accent: "#e5e5e5",

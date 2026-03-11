@@ -3,9 +3,14 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Github } from "lucide-react";
-import { useAuthStore } from "@/store/auth";
+import { motion } from "framer-motion";
+import { Github, KeyRound } from "lucide-react";
+import { signIn } from "@/store/auth";
+import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
+
+const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
+const item = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -41,7 +46,6 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? "/dashboard";
-  const { login, loginWithGitHub, loginWithGoogle } = useAuthStore();
   const [error, setError] = useState("");
 
   const {
@@ -52,20 +56,47 @@ export function Login() {
 
   const onSubmit = async (data: FormData) => {
     setError("");
-    try {
-      await login(data.email, data.password);
-      navigate(from, { replace: true });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Login failed");
+    const { error: err } = await signIn.email({ email: data.email, password: data.password });
+    if (err) {
+      setError(err.message ?? "Login failed");
+      return;
     }
+    navigate(from, { replace: true });
+  };
+
+  const onGitHub = async () => {
+    setError("");
+    await signIn.social({ provider: "github", callbackURL: from });
+  };
+
+  const onGoogle = async () => {
+    setError("");
+    await signIn.social({ provider: "google", callbackURL: from });
+  };
+
+  const onPasskey = async () => {
+    setError("");
+    const { error: err } = await authClient.signIn.passkey({
+      fetchOptions: {
+        onSuccess: () => navigate(from, { replace: true }),
+        onError: (ctx) => setError(ctx.error?.message ?? "Passkey sign-in failed"),
+      },
+    });
+    if (err) setError(err.message ?? "Passkey sign-in failed");
   };
 
   return (
-    <div className="max-w-sm mx-auto py-12 animate-in">
-      <h1 className="font-sans text-2xl font-semibold text-hm-text mb-6">Log in</h1>
-      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" autoComplete="off">
-        <div>
+    <motion.div
+      className="max-w-sm mx-auto py-12"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+    >
+      <motion.div variants={container} initial="hidden" animate="show">
+        <motion.h1 variants={item} className="font-sans text-2xl font-semibold text-hm-text mb-6">Log in</motion.h1>
+        {error && <motion.p variants={item} className="mb-4 text-sm text-red-400">{error}</motion.p>}
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" autoComplete="off">
+        <motion.div variants={item}>
           <label className="block font-mono text-xs text-hm-muted mb-1">Email</label>
           <input
             {...register("email")}
@@ -74,8 +105,8 @@ export function Login() {
             className="w-full bg-hm-surface border border-hm-border px-3 py-2 text-hm-text focus:outline-none focus:border-hm-muted transition-colors"
           />
           {errors.email && <p className="mt-1 text-sm text-red-400">{errors.email.message}</p>}
-        </div>
-        <div>
+        </motion.div>
+        <motion.div variants={item}>
           <label className="block font-mono text-xs text-hm-muted mb-1">Password</label>
           <input
             {...register("password")}
@@ -84,15 +115,18 @@ export function Login() {
             className="w-full bg-hm-surface border border-hm-border px-3 py-2 text-hm-text focus:outline-none focus:border-hm-muted transition-colors"
           />
           {errors.password && <p className="mt-1 text-sm text-red-400">{errors.password.message}</p>}
-        </div>
+        </motion.div>
+        <motion.div variants={item}>
         <Button type="submit" disabled={isSubmitting} className="w-full transition-transform hover:scale-[1.01] active:scale-[0.99]">
           {isSubmitting ? "Logging in…" : "Log in"}
         </Button>
+        </motion.div>
       </form>
       <div className="mt-6 flex flex-col gap-2">
+        <motion.div variants={item}>
         <Button
           variant="outline"
-          onClick={loginWithGitHub}
+          onClick={onGitHub}
           className="w-full gap-2 transition-transform hover:scale-[1.01] active:scale-[0.99]"
         >
           <Github className="size-5 shrink-0" aria-hidden />
@@ -100,16 +134,26 @@ export function Login() {
         </Button>
         <Button
           variant="outline"
-          onClick={loginWithGoogle}
+          onClick={onGoogle}
           className="w-full gap-2 transition-transform hover:scale-[1.01] active:scale-[0.99]"
         >
           <GoogleIcon className="size-5 shrink-0" />
           Log in with Google
         </Button>
+        <Button
+          variant="outline"
+          onClick={onPasskey}
+          className="w-full gap-2 transition-transform hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <KeyRound className="size-5 shrink-0" aria-hidden />
+          Sign in with passkey
+        </Button>
+        </motion.div>
       </div>
-      <p className="mt-6 text-sm text-hm-muted">
+      <motion.p variants={item} className="mt-6 text-sm text-hm-muted">
         Don&apos;t have an account? <Link to="/register" className="text-hm-text hover:underline">Register</Link>
-      </p>
-    </div>
+      </motion.p>
+      </motion.div>
+    </motion.div>
   );
 }

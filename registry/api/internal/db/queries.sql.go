@@ -321,6 +321,32 @@ func (q *Queries) CreatePackageVersion(ctx context.Context, arg CreatePackageVer
 	return i, err
 }
 
+const createRegistryProfile = `-- name: CreateRegistryProfile :one
+INSERT INTO registry_profiles (user_id, username)
+VALUES ($1, $2)
+RETURNING user_id, username, bio, website, total_packages, total_downloads, created_at
+`
+
+type CreateRegistryProfileParams struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+}
+
+func (q *Queries) CreateRegistryProfile(ctx context.Context, arg CreateRegistryProfileParams) (RegistryProfile, error) {
+	row := q.db.QueryRow(ctx, createRegistryProfile, arg.UserID, arg.Username)
+	var i RegistryProfile
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.Bio,
+		&i.Website,
+		&i.TotalPackages,
+		&i.TotalDownloads,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, username, password_hash)
 VALUES ($1, $2, $3)
@@ -634,6 +660,25 @@ func (q *Queries) GetPackageVersion(ctx context.Context, arg GetPackageVersionPa
 		&i.VerificationStatus,
 		&i.VerificationReport,
 		&i.SigstoreBundle,
+	)
+	return i, err
+}
+
+const getRegistryProfileByUserID = `-- name: GetRegistryProfileByUserID :one
+SELECT user_id, username, bio, website, total_packages, total_downloads, created_at FROM registry_profiles WHERE user_id = $1
+`
+
+func (q *Queries) GetRegistryProfileByUserID(ctx context.Context, userID string) (RegistryProfile, error) {
+	row := q.db.QueryRow(ctx, getRegistryProfileByUserID, userID)
+	var i RegistryProfile
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.Bio,
+		&i.Website,
+		&i.TotalPackages,
+		&i.TotalDownloads,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1473,6 +1518,39 @@ func (q *Queries) UpdatePackageVersionVerification(ctx context.Context, arg Upda
 		&i.VerificationStatus,
 		&i.VerificationReport,
 		&i.SigstoreBundle,
+	)
+	return i, err
+}
+
+const updateRegistryProfile = `-- name: UpdateRegistryProfile :one
+UPDATE registry_profiles SET username = $2, bio = $3, website = $4
+WHERE user_id = $1
+RETURNING user_id, username, bio, website, total_packages, total_downloads, created_at
+`
+
+type UpdateRegistryProfileParams struct {
+	UserID   string      `json:"user_id"`
+	Username string      `json:"username"`
+	Bio      pgtype.Text `json:"bio"`
+	Website  pgtype.Text `json:"website"`
+}
+
+func (q *Queries) UpdateRegistryProfile(ctx context.Context, arg UpdateRegistryProfileParams) (RegistryProfile, error) {
+	row := q.db.QueryRow(ctx, updateRegistryProfile,
+		arg.UserID,
+		arg.Username,
+		arg.Bio,
+		arg.Website,
+	)
+	var i RegistryProfile
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.Bio,
+		&i.Website,
+		&i.TotalPackages,
+		&i.TotalDownloads,
+		&i.CreatedAt,
 	)
 	return i, err
 }

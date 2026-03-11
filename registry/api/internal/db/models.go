@@ -97,7 +97,7 @@ type Package struct {
 	Verified       pgtype.Bool        `json:"verified"`
 	Trusted        pgtype.Bool        `json:"trusted"`
 	TotalDownloads pgtype.Int8        `json:"total_downloads"`
-	SearchVector   interface{}        `json:"search_vector"`
+	SearchVector   string             `json:"search_vector"`
 }
 
 type PackageFile struct {
@@ -131,6 +131,16 @@ type PackageVersion struct {
 	VerificationStatus pgtype.Text        `json:"verification_status"`
 	VerificationReport []byte             `json:"verification_report"`
 	SigstoreBundle     []byte             `json:"sigstore_bundle"`
+}
+
+type RegistryProfile struct {
+	UserID         string             `json:"user_id"`
+	Username       string             `json:"username"`
+	Bio            pgtype.Text        `json:"bio"`
+	Website        pgtype.Text        `json:"website"`
+	TotalPackages  pgtype.Int4        `json:"total_packages"`
+	TotalDownloads pgtype.Int8        `json:"total_downloads"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

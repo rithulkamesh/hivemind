@@ -172,3 +172,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
+
+-- Registry profiles (Better Auth user_id → registry-specific fields)
+CREATE TABLE IF NOT EXISTS registry_profiles (
+    user_id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    bio TEXT,
+    website TEXT,
+    total_packages INTEGER DEFAULT 0,
+    total_downloads BIGINT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_registry_profiles_username ON registry_profiles(username);

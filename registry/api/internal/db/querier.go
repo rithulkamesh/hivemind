@@ -20,6 +20,7 @@ type Querier interface {
 	CreatePackage(ctx context.Context, arg CreatePackageParams) (Package, error)
 	CreatePackageFile(ctx context.Context, arg CreatePackageFileParams) (PackageFile, error)
 	CreatePackageVersion(ctx context.Context, arg CreatePackageVersionParams) (PackageVersion, error)
+	CreateRegistryProfile(ctx context.Context, arg CreateRegistryProfileParams) (RegistryProfile, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeletePackage(ctx context.Context, id uuid.UUID) error
 	DeletePackageVersion(ctx context.Context, id uuid.UUID) error
@@ -34,6 +35,7 @@ type Querier interface {
 	GetPackageFileByID(ctx context.Context, id uuid.UUID) (PackageFile, error)
 	GetPackageFileByVersionAndFilename(ctx context.Context, arg GetPackageFileByVersionAndFilenameParams) (PackageFile, error)
 	GetPackageVersion(ctx context.Context, arg GetPackageVersionParams) (PackageVersion, error)
+	GetRegistryProfileByUserID(ctx context.Context, userID string) (RegistryProfile, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
@@ -61,6 +63,7 @@ type Querier interface {
 	UpdateOrgMemberRole(ctx context.Context, arg UpdateOrgMemberRoleParams) (OrgMember, error)
 	UpdatePackage(ctx context.Context, arg UpdatePackageParams) (Package, error)
 	UpdatePackageVersionVerification(ctx context.Context, arg UpdatePackageVersionVerificationParams) (PackageVersion, error)
+	UpdateRegistryProfile(ctx context.Context, arg UpdateRegistryProfileParams) (RegistryProfile, error)
 	UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error)
 	YankPackageVersion(ctx context.Context, arg YankPackageVersionParams) (PackageVersion, error)
 }

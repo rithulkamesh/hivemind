@@ -9,7 +9,7 @@ function command(tab: Tab, name: string, version?: string): string {
   const pkg = version ? `${name}==${version}` : name;
   switch (tab) {
     case "pip":
-      return `pip install --index-url ${REGISTRY_URL} ${pkg}`;
+      return `pip install --extra-index-url=${REGISTRY_URL} ${pkg}`;
     case "uv":
       return `uv add --index ${REGISTRY_URL} ${pkg}`;
     case "hivemind":
@@ -36,11 +36,10 @@ export function InstallCommand({ name, version }: InstallCommandProps) {
             key={t}
             type="button"
             onClick={() => setTab(t)}
-            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
-              tab === t
+            className={`px-4 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${tab === t
                 ? "bg-hm-surface text-hm-text border-b-2 border-hm-amber -mb-px"
                 : "text-hm-muted hover:text-hm-text-passive"
-            }`}
+              }`}
           >
             {t}
           </button>

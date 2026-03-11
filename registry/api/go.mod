@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.27.11
 	github.com/aws/aws-sdk-go-v2/service/ses v1.34.20
 	github.com/go-chi/chi/v5 v5.1.0
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.2
@@ -17,6 +17,8 @@ require (
 )
 
 require (
+	github.com/MicahParks/jwkset v0.11.0 // indirect
+	github.com/MicahParks/keyfunc/v3 v3.8.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.8 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.11 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.19 // indirect
@@ -42,4 +44,5 @@ require (
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/time v0.12.0 // indirect
 )

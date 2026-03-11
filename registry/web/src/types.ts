@@ -26,6 +26,7 @@ export interface Package {
   trusted?: boolean;
   total_downloads?: number;
   created_at?: string;
+  owner_user_id?: string | null;
 }
 
 export interface PackageVersion {

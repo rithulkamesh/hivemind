@@ -1,33 +1,60 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, apiRoutes } from "@/lib/api";
+import { api, apiRoutes, apiBase } from "@/lib/api";
+import { getApiToken } from "@/lib/auth-client";
 import type { ApiKeyRow } from "@/types";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ApiKeyForm } from "@/components/auth/ApiKeyForm";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { motion, AnimatePresence } from "framer-motion";
 
 export function ApiKeys() {
   const [showForm, setShowForm] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ key: string; prefix: string } | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: keys, isLoading } = useQuery({
+  const { data: keys, isLoading, error } = useQuery({
     queryKey: ["api-keys"],
-    queryFn: () => api<ApiKeyRow[]>(apiRoutes.apiKeys()),
+    queryFn: async () => {
+      console.log("Fetching API keys...");
+      try {
+        const res = await api<ApiKeyRow[]>(apiRoutes.apiKeys());
+        console.log("API keys fetched:", res);
+        return res;
+      } catch (err) {
+        console.error("Error fetching API keys:", err);
+        throw err;
+      }
+    },
   });
 
+  if (error) {
+    console.error("Query error:", error);
+  }
+
   const revoke = useMutation({
-    mutationFn: (id: string) =>
-      fetch(import.meta.env.VITE_API_BASE_URL + apiRoutes.revokeApiKey(id), { method: "DELETE" }),
+    mutationFn: async (id: string) => {
+      const token = await getApiToken();
+      const res = await fetch(apiBase + apiRoutes.revokeApiKey(id), {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["api-keys"] }),
   });
 
   const handleCreate = async (data: { name: string; scopes: string[]; expires_days?: number }) => {
-    const res = await fetch(import.meta.env.VITE_API_BASE_URL + apiRoutes.apiKeys(), {
+    const token = await getApiToken();
+    const res = await fetch(apiBase + apiRoutes.apiKeys(), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("access_token")}` },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(data),
     });
     if (!res.ok) throw new Error(await res.text());
@@ -39,7 +66,12 @@ export function ApiKeys() {
   };
 
   return (
-    <div className="flex gap-8">
+    <motion.div
+      className="flex gap-8"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+    >
       <Sidebar variant="dashboard" />
       <div className="flex-1 min-w-0">
         <h1 className="font-sans text-2xl font-semibold text-hm-text mb-6">API keys</h1>
@@ -59,11 +91,23 @@ export function ApiKeys() {
             </button>
           </div>
         )}
-        {showForm ? (
-          <ApiKeyForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
-        ) : (
-          <Button onClick={() => setShowForm(true)}>Create key</Button>
-        )}
+        <AnimatePresence mode="wait">
+          {showForm ? (
+            <motion.div
+              key="form"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <ApiKeyForm onSubmit={handleCreate} onCancel={() => setShowForm(false)} />
+            </motion.div>
+          ) : (
+            <motion.div key="btn" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Button onClick={() => setShowForm(true)}>Create key</Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
         <div className="mt-8 border border-hm-border overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -77,7 +121,13 @@ export function ApiKeys() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={5} className="px-4 py-4 text-hm-muted">Loading…</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-4 py-6">
+                    <LoadingSkeleton className="h-8 w-full" />
+                    <LoadingSkeleton className="h-8 w-full mt-2" />
+                    <LoadingSkeleton className="h-8 w-full mt-2" />
+                  </td>
+                </tr>
               ) : (keys ?? []).map((k) => (
                 <tr key={k.id} className="border-b border-hm-border last:border-0">
                   <td className="px-4 py-2 text-hm-text">{k.name}</td>
@@ -102,6 +152,6 @@ export function ApiKeys() {
           </table>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

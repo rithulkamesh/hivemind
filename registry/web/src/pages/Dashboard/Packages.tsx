@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
 import { api, apiRoutes } from "@/lib/api";
 import type { Package } from "@/types";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 
 export function DashboardPackages() {
   const { data, isLoading } = useQuery({
@@ -14,17 +16,33 @@ export function DashboardPackages() {
   const packages = data?.packages ?? [];
 
   return (
-    <div className="flex gap-8">
+    <motion.div
+      className="flex gap-8"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
+    >
       <Sidebar variant="dashboard" />
       <div className="flex-1 min-w-0">
-        <h1 className="font-sans text-2xl font-semibold text-hm-text mb-6">Packages</h1>
+        <div className="flex items-center justify-between gap-4 mb-6">
+          <h1 className="font-sans text-2xl font-semibold text-hm-text">Packages</h1>
+          <Link to="/dashboard/packages/new">
+            <span className="inline-flex items-center justify-center font-mono text-xs tracking-wider uppercase px-4 py-2 border border-hm-border text-hm-text hover:bg-hm-surface">
+              Create package
+            </span>
+          </Link>
+        </div>
         {isLoading ? (
-          <p className="text-hm-muted">Loading…</p>
+          <div className="space-y-2">
+            <LoadingSkeleton className="h-12 w-full" />
+            <LoadingSkeleton className="h-12 w-full" />
+            <LoadingSkeleton className="h-12 w-full" />
+          </div>
         ) : packages.length === 0 ? (
           <EmptyState
             title="No packages"
             description="Create a package to start publishing."
-            action={<Link to="/dashboard" className="inline-flex items-center justify-center font-mono text-xs tracking-wider uppercase px-4 py-2 border border-hm-border text-hm-text hover:bg-hm-surface">Dashboard</Link>}
+            action={<Link to="/dashboard/packages/new" className="inline-flex items-center justify-center font-mono text-xs tracking-wider uppercase px-4 py-2 border border-hm-border text-hm-text hover:bg-hm-surface">Create package</Link>}
           />
         ) : (
           <div className="border border-hm-border overflow-x-auto">
@@ -63,6 +81,6 @@ export function DashboardPackages() {
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

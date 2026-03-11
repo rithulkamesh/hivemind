@@ -1,0 +1,58 @@
+# Registry dev — run from registry/
+# Install: https://github.com/casey/just
+# Usage: cd registry && just <recipe>
+# Copy .env.example to .env and set DATABASE_URL (and OAuth vars if you want social login).
+
+set dotenv-load
+
+# Start Postgres in Docker. Then run: just dev
+deps:
+    docker compose -f docker-compose.dev.yml up postgres -d
+    @echo "Waiting for postgres..."
+    sleep 3
+    @echo "Deps up. Run: just dev  (API + web in one terminal, Ctrl+C kills all)"
+
+# Run API (air) + Web (Vite + Better Auth). Ctrl+C kills all. Requires .env with DATABASE_URL.
+dev: deps
+    #!/usr/bin/env bash
+    set -e
+    if [ -z "$${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env and set it."; exit 1; fi
+    trap 'kill $(jobs -p) 2>/dev/null; exit 130' INT TERM
+    (cd api && air) &
+    (cd web && ( [ -d node_modules ] || bun install ) && exec bun run dev) &
+    wait
+
+# Run API only (requires Postgres). Uses .env.
+api:
+    cd api && air
+
+# Run Web only (Vite + Better Auth). Proxies /api and /simple to localhost:8080.
+web:
+    cd web && bun run dev
+
+# Run Go API migrations (packages, orgs, etc.). Requires Postgres. Uses .env.
+db-migrate:
+    cd api && MIGRATE_ONLY=1 go run ./cmd/registry
+
+# Run Better Auth migrations (user, session, account, verification, jwks, twoFactor, etc.).
+# Requires Postgres and .env with DATABASE_URL. Run from registry/ so .env is loaded.
+# See https://better-auth.com/docs/adapters/postgresql
+auth-migrate:
+    #!/usr/bin/env bash
+    set -e
+    cd "{{ justfile_directory() }}"
+    [ -f .env ] && set -a && source .env && set +a
+    if [ -z "$${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env in registry/."; exit 1; fi
+    cd web && npx auth@latest migrate --config ./server/auth.ts --yes
+
+# Full stack in Docker (postgres + api + web). No host watch.
+dev-docker:
+    docker compose -f docker-compose.dev.yml up
+
+# Build test plugin wheel/sdist
+test-plugin-build:
+    cd test-plugin && pip install build && python -m build
+
+# Install test plugin from local registry (registry must be up and package uploaded or seeded)
+test-plugin-install:
+    pip install --index-url http://localhost:3000/simple/ hivemind-plugin-demo

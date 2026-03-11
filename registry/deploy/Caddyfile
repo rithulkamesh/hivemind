@@ -1,11 +1,8 @@
 # Caddyfile for registry.hivemind.rithul.dev
-# Reverse-proxy API paths; serve React static for everything else.
+# API and simple index -> Go; everything else (SPA + /auth) -> web (Node server serving static + Better Auth).
 
 registry.hivemind.rithul.dev {
     handle /api/* {
-        reverse_proxy api:8080
-    }
-    handle /auth/* {
         reverse_proxy api:8080
     }
     handle /simple/* {
@@ -18,9 +15,7 @@ registry.hivemind.rithul.dev {
         reverse_proxy api:8080
     }
     handle {
-        root * /srv/web
-        try_files {path} /index.html
-        file_server
+        reverse_proxy web:3000
     }
 
     header {

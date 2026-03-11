@@ -1,19 +1,19 @@
 import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuthStore } from "@/store/auth";
+import { useSession } from "@/store/auth";
+import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
 
 interface AuthGuardProps {
   children: ReactNode;
 }
 
 export function AuthGuard({ children }: AuthGuardProps) {
-  const user = useAuthStore((s) => s.user);
-  const token = useAuthStore((s) => s.token);
+  const { data: session, isPending } = useSession();
   const location = useLocation();
 
-  if (!token && !user) {
+  if (isPending) return <LoadingSkeleton />;
+  if (!session?.user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
-
   return <>{children}</>;
 }

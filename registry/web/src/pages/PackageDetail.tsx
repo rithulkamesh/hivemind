@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiRoutes } from "@/lib/api";
 import type { Package, PackageVersion, PackageFile } from "@/types";
 import { PackageHeader } from "@/components/packages/PackageHeader";
@@ -10,12 +10,19 @@ import { DownloadChart } from "@/components/packages/DownloadChart";
 import { ReadmeRenderer } from "@/components/packages/ReadmeRenderer";
 import { ToolList } from "@/components/packages/ToolList";
 import { LoadingSkeleton } from "@/components/ui/LoadingSkeleton";
+import { authClient } from "@/lib/auth-client";
 
-type Tab = "overview" | "versions" | "files" | "stats";
+type Tab = "overview" | "versions" | "files" | "stats" | "settings";
 
 export function PackageDetail() {
   const { name } = useParams<{ name: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<Tab>("overview");
+  const { data: session } = authClient.useSession();
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: pkg, isLoading } = useQuery({
     queryKey: ["package", name],
@@ -50,6 +57,11 @@ export function PackageDetail() {
     { id: "stats", label: "Stats" },
   ];
 
+  const isOwner = session?.user?.id && pkg.owner_user_id === session.user.id;
+  if (isOwner) {
+    tabs.push({ id: "settings", label: "Settings" });
+  }
+
   const latestVersion = versions?.[0];
   const files: PackageFile[] = latestVersion
     ? [] // would need API: list files for version
@@ -59,6 +71,23 @@ export function PackageDetail() {
     date: d.date,
     downloads: d.downloads,
   }));
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await api(apiRoutes.deletePackage(pkg.name), { method: "DELETE" });
+      await queryClient.invalidateQueries({ queryKey: ["packages"] });
+      // Add a small delay to ensure cache is cleared before navigation
+      setTimeout(() => {
+        navigate("/dashboard/packages", { replace: true });
+      }, 100);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8">
@@ -70,11 +99,10 @@ export function PackageDetail() {
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2 font-mono text-xs uppercase tracking-wider border-b-2 -mb-px transition-colors ${
-                tab === t.id
-                  ? "border-hm-text text-hm-text"
-                  : "border-transparent text-hm-muted hover:text-hm-text-passive"
-              }`}
+              className={`px-4 py-2 font-mono text-xs uppercase tracking-wider border-b-2 -mb-px transition-colors ${tab === t.id
+                ? "border-hm-text text-hm-text"
+                : "border-transparent text-hm-muted hover:text-hm-text-passive"
+                }`}
             >
               {t.label}
             </button>
@@ -102,6 +130,55 @@ export function PackageDetail() {
           )}
           {tab === "stats" && (
             <DownloadChart data={chartData} />
+          )}
+          {tab === "settings" && isOwner && (
+            <div className="space-y-8 max-w-2xl">
+              <div className="border border-hm-error/50 p-6">
+                <h3 className="font-sans text-xl font-semibold text-hm-error mb-2">Delete Package</h3>
+                <p className="text-hm-text-passive mb-6">
+                  Permanently delete this package, all its versions, and all its files from the registry.
+                  This action cannot be undone, and the package name will be freed up for others to use.
+                </p>
+
+                {deleteError && (
+                  <div className="bg-hm-error/10 border border-hm-error text-hm-error px-4 py-3 mb-4">
+                    {deleteError}
+                  </div>
+                )}
+
+                {!showDeleteConfirm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="font-mono text-sm px-4 py-2 border border-hm-error text-hm-error hover:bg-hm-error hover:text-hm-surface transition-colors cursor-pointer"
+                  >
+                    Delete package
+                  </button>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="font-semibold text-hm-error">Are you absolutely sure?</p>
+                    <div className="flex gap-4">
+                      <button
+                        type="button"
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                        className="font-mono text-sm px-4 py-2 border border-hm-error bg-hm-error text-hm-surface hover:bg-hm-error/90 transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        {isDeleting ? "Deleting..." : "Yes, delete package"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        disabled={isDeleting}
+                        className="font-mono text-sm px-4 py-2 border border-hm-border text-hm-text transition-colors hover:bg-hm-surface disabled:opacity-50 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>

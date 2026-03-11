@@ -210,3 +210,16 @@ LIMIT $1 OFFSET $2;
 
 -- name: SetUserBanned :exec
 UPDATE users SET banned = true WHERE id = $1;
+
+-- name: GetRegistryProfileByUserID :one
+SELECT * FROM registry_profiles WHERE user_id = $1;
+
+-- name: CreateRegistryProfile :one
+INSERT INTO registry_profiles (user_id, username)
+VALUES ($1, $2)
+RETURNING *;
+
+-- name: UpdateRegistryProfile :one
+UPDATE registry_profiles SET username = $2, bio = $3, website = $4
+WHERE user_id = $1
+RETURNING *;

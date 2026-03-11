@@ -1,13 +1,15 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Search, LogIn, User, LogOut, LayoutDashboard, Github } from "lucide-react";
 import { useState } from "react";
-import { useAuthStore } from "@/store/auth";
+import { useSession, signOut, useMe } from "@/store/auth";
 import { SearchBar } from "@/search/SearchBar";
 
 export function Header() {
-  const { user, logout } = useAuthStore();
+  const { data: session } = useSession();
+  const { data: me } = useMe();
   const navigate = useNavigate();
   const [searchOpen, setSearchOpen] = useState(false);
+  const displayName = me?.username ?? session?.user?.name ?? session?.user?.email ?? "Account";
 
   return (
     <header className="sticky top-0 z-50 bg-hm-bg/95 backdrop-blur border-b border-hm-border min-h-[48px] flex items-center px-hm-lg">
@@ -17,6 +19,13 @@ export function Header() {
           className="font-mono text-xs tracking-widest uppercase text-hm-text hover:opacity-90 transition-opacity"
         >
           Hivemind Registry
+        </Link>
+        
+        <Link 
+          to="/packages" 
+          className="ml-4 font-sans text-sm font-medium text-hm-muted hover:text-hm-text transition-colors"
+        >
+          Packages
         </Link>
 
         <div className="flex-1 max-w-xl mx-4 hidden sm:block">
@@ -33,7 +42,7 @@ export function Header() {
             <Search size={18} />
           </button>
 
-          {user ? (
+          {session?.user ? (
             <>
               <Link
                 to="/dashboard"
@@ -50,7 +59,7 @@ export function Header() {
                   aria-haspopup="true"
                 >
                   <User size={18} />
-                  <span className="hidden sm:inline">{user.username}</span>
+                  <span className="hidden sm:inline">{displayName}</span>
                 </button>
                 <div className="absolute right-0 top-full mt-1 py-1 w-48 bg-hm-surface border border-hm-border rounded shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
                   <Link
@@ -63,7 +72,7 @@ export function Header() {
                     type="button"
                     className="w-full text-left px-3 py-2 text-sm text-hm-text-passive hover:text-hm-text hover:bg-hm-border/50 flex items-center gap-2"
                     onClick={() => {
-                      logout();
+                      signOut();
                       navigate("/");
                     }}
                   >

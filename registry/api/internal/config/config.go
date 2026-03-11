@@ -38,15 +38,28 @@ type Config struct {
 	SESFromAddress  string
 	SESReplyTo      string
 
+	// SMTP (e.g. Mailhog in dev: SMTP_HOST=mailhog SMTP_PORT=1025)
+	SMTPHost     string
+	SMTPPort     string
+	SMTPFrom     string
+	SMTPUser     string
+	SMTPPassword string
+
 	// App
-	BaseURL string
-	Port    string
+	BaseURL     string // API public URL (for OAuth redirect_uri)
+	FrontendURL string // Where to redirect after OAuth login (defaults to BaseURL if empty)
+	Port        string
 
 	// ECR (Docker images)
 	ECRRegistry string
 
 	// Admin bootstrap
 	AdminSecret string
+
+	// Better Auth: JWKS URL for JWT verification (e.g. http://auth:3001/auth/.well-known/jwks.json)
+	JWKSURL string
+	// Internal secret for auth service → API calls (e.g. email send)
+	InternalSecret string
 
 	// Rate limit
 	RateLimitRPS int
@@ -73,10 +86,18 @@ func Load() (*Config, error) {
 		SESRegion:           getEnv("SES_REGION", "us-east-1"),
 		SESFromAddress:      getEnv("SES_FROM_ADDRESS", "noreply@hivemind.rithul.dev"),
 		SESReplyTo:          getEnv("SES_REPLY_TO", "support@hivemind.rithul.dev"),
+		SMTPHost:            getEnv("SMTP_HOST", ""),
+		SMTPPort:            getEnv("SMTP_PORT", "1025"),
+		SMTPFrom:            getEnv("SMTP_FROM", "noreply@localhost"),
+		SMTPUser:            getEnv("SMTP_USER", ""),
+		SMTPPassword:        getEnv("SMTP_PASSWORD", ""),
 		BaseURL:             getEnv("BASE_URL", "https://registry.hivemind.rithul.dev"),
+		FrontendURL:         getEnv("FRONTEND_URL", ""), // if empty, redirects use BaseURL
 		Port:                getEnv("PORT", "8080"),
 		ECRRegistry:         getEnv("ECR_REGISTRY", ""),
 		AdminSecret:         getEnv("ADMIN_SECRET", ""),
+		JWKSURL:             getEnv("JWKS_URL", ""),
+		InternalSecret:      getEnv("INTERNAL_SECRET", ""),
 		RateLimitRPS:        getEnvInt("RATE_LIMIT_RPS", 10),
 		MaxUploadSizeMB:     getEnvInt("MAX_UPLOAD_SIZE_MB", 100),
 		VerificationWorkers: getEnvInt("VERIFICATION_WORKERS", 4),
@@ -85,8 +106,9 @@ func Load() (*Config, error) {
 	if c.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
-	if c.JWTSecret == "" {
-		return nil, fmt.Errorf("JWT_SECRET is required")
+	// JWT_SECRET or JWKS_URL required (JWKS for Better Auth, JWT_SECRET for legacy)
+	if c.JWTSecret == "" && c.JWKSURL == "" {
+		return nil, fmt.Errorf("either JWT_SECRET or JWKS_URL is required")
 	}
 
 	return c, nil
