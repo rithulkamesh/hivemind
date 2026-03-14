@@ -1,81 +1,188 @@
+# Registry Deploy: test both components, build arm64 images, push to ECR, deploy stack.
+# Replaces per-component workflows (registry-api.yml, registry-web.yml).
+#
+# Triggers:
+#   - Push to main touching registry/** or this workflow
+#   - Manual dispatch with optional force deploy (skip tests)
+
 name: Registry Deploy
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - 'registry/**'
+      - "registry/**"
+      - ".github/workflows/registry-deploy.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force deploy (skip tests)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: registry-deploy
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  # ── Tests ──────────────────────────────────────────────────────────────
+
+  test-api:
+    if: ${{ !inputs.force }}
     runs-on: ubuntu-latest
-    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - "5432:5432"
+        options: --health-cmd "pg_isready -U test" --health-interval 5s
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
-          
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
+          go-version: "1.24"
+          cache: true
+          cache-dependency-path: registry/api/go.sum
+      - name: Run Go tests
+        run: go test ./... -race -coverprofile=coverage.out
+        working-directory: registry/api
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
+      - name: Run go vet
+        run: go vet ./...
+        working-directory: registry/api
+
+  test-web:
+    if: ${{ !inputs.force }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-          
-      - name: API Tests
-        working-directory: registry/api
-        run: |
-          go mod tidy
-          go test ./...
-          
-      - name: Web Typecheck
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
         working-directory: registry/web
-        run: |
-          bun install
-          bun run tsc -b
-          
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Typecheck
+        run: bun run tsc -b
+        working-directory: registry/web
+
+  # ── Build & Push ───────────────────────────────────────────────────────
+
+  build-and-push:
+    needs: [test-api, test-web]
+    if: |
+      always() &&
+      (needs.test-api.result == 'success' || needs.test-api.result == 'skipped') &&
+      (needs.test-web.result == 'success' || needs.test-web.result == 'skipped') &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image-tag: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-          
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-        
-      - name: Setup Just
-        uses: extractions/setup-just@v2
-        
-      - name: Build and Push Docker Images
-        working-directory: registry
-        env:
-          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/hivemind-registry-deploy
+          aws-region: us-east-1
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: registry/api
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/hivemind-registry-api:latest
+            ${{ steps.ecr-login.outputs.registry }}/hivemind-registry-api:${{ github.sha }}
+          cache-from: type=gha,scope=registry-api
+          cache-to: type=gha,mode=max,scope=registry-api
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: registry/web
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/hivemind-registry-web:latest
+            ${{ steps.ecr-login.outputs.registry }}/hivemind-registry-web:${{ github.sha }}
+          cache-from: type=gha,scope=registry-web
+          cache-to: type=gha,mode=max,scope=registry-web
+
+  # ── Deploy ─────────────────────────────────────────────────────────────
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EC2_HOST: ${{ vars.REGISTRY_EC2_HOST }}
+      EC2_INSTANCE_ID: ${{ vars.REGISTRY_EC2_INSTANCE_ID }}
+      ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+      IMAGE_TAG: ${{ needs.build-and-push.outputs.image-tag }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/hivemind-registry-deploy
+          aws-region: us-east-1
+
+      - name: Deploy via EC2 Instance Connect
         run: |
-          just docker-build
-          
-      - name: Deploy to EC2
-        working-directory: registry
-        env:
-          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
+          # Generate ephemeral SSH key (valid ~60s after push)
+          ssh-keygen -t ed25519 -f /tmp/deploy_key -N "" -q
+          aws ec2-instance-connect send-ssh-public-key \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --instance-os-user ubuntu \
+            --ssh-public-key file:///tmp/deploy_key.pub
+
+          # Rolling deploy: pull new images, restart web first (faster), then api
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ubuntu@"$EC2_HOST" \
+            "set -euo pipefail && \
+             aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY && \
+             cd /opt/hivemind-registry && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod pull api web && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-deps web && \
+             sleep 3 && \
+             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-deps api && \
+             docker image prune -f"
+
+          rm -f /tmp/deploy_key /tmp/deploy_key.pub
+
+      - name: Smoke test
         run: |
-          echo "${{ secrets.EC2_KEY }}" > ec2_key.pem
-          chmod 600 ec2_key.pem
-          export EC2_KEY_PATH=$(pwd)/ec2_key.pem
-          mkdir -p ~/.ssh
-          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
-          just ssh-deploy
-          rm ec2_key.pem
-          
-      - name: Smoke Tests
-        working-directory: registry
-        env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-        run: |
-          just smoke
+          echo "Waiting for services to stabilize..."
+          sleep 8
+
+          # Check API health
+          curl -sf --retry 3 --retry-delay 5 "https://registry.hivemind.rithul.dev/health" || \
+            { echo "FAIL: /health"; exit 1; }
+
+          # Check JWKS endpoint
+          curl -sf --retry 3 --retry-delay 5 "https://registry.hivemind.rithul.dev/auth/jwks" || \
+            { echo "FAIL: /auth/jwks"; exit 1; }
+
+          # Check web frontend
+          curl -sf --retry 3 --retry-delay 5 "https://registry.hivemind.rithul.dev/" || \
+            { echo "FAIL: / (web)"; exit 1; }
+
+          # Check packages API
+          curl -sf --retry 3 --retry-delay 5 "https://registry.hivemind.rithul.dev/api/v1/packages" || \
+            { echo "FAIL: /api/v1/packages"; exit 1; }
+
+          echo "All smoke tests passed"
