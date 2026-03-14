@@ -27,9 +27,9 @@ app.post("/auth/set-password", async (req, res) => {
   }
 });
 
-app.all("/auth/*", toNodeHandler(auth));
+app.all("/auth/{*splat}", toNodeHandler(auth));
 app.use(express.static(path.join(__dirname, "../dist")));
-app.get("*", (_req, res) => {
+app.get("{*splat}", (_req, res) => {
   res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
 

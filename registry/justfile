@@ -5,6 +5,10 @@
 
 set dotenv-load
 
+ECR_REGISTRY := env("ECR_REGISTRY", "935761084809.dkr.ecr.us-east-1.amazonaws.com")
+EC2_HOST := env("EC2_HOST", "44.219.173.39")
+EC2_INSTANCE_ID := env("EC2_INSTANCE_ID", "i-0ad1fdc8775243aee")
+
 # Start Postgres + Mailhog + MinIO in Docker. Then run: just dev
 deps:
     docker compose -f docker-compose.dev.yml up postgres mailhog minio createbuckets -d
@@ -43,7 +47,6 @@ db-migrate:
 
 # Run Better Auth migrations (user, session, account, verification, jwks, twoFactor, etc.).
 # Requires Postgres and .env with DATABASE_URL. Run from registry/ so .env is loaded.
-# See https://better-auth.com/docs/adapters/postgresql
 auth-migrate:
     #!/usr/bin/env bash
     set -e
@@ -64,26 +67,97 @@ test-plugin-build:
 test-plugin-install:
     pip install --index-url http://localhost:3000/simple/ hivemind-plugin-demo
 
-# Build images and push to ECR
-docker-build:
-    docker build -t registry-api ./api
-    docker build -t registry-web ./web
-    docker tag registry-api $$ECR_REGISTRY/registry-api:latest
-    docker tag registry-web $$ECR_REGISTRY/registry-web:latest
-    docker push $$ECR_REGISTRY/registry-api:latest
-    docker push $$ECR_REGISTRY/registry-web:latest
+# --- Production Deploy ---
 
-# Trigger deploy on EC2
-deploy: docker-build ssh-deploy
+# Build and push API image to ECR (arm64)
+build-api:
+    docker buildx build --platform linux/arm64 -t {{ECR_REGISTRY}}/hivemind-registry-api:latest --push ./api
 
-# SSH and deploy
-ssh-deploy:
-    ssh -o StrictHostKeyChecking=no -i $$EC2_KEY_PATH $$EC2_USER@$$EC2_HOST "aws ecr get-login-password --region $$AWS_REGION | docker login --username AWS --password-stdin $$ECR_REGISTRY && cd /opt/registry && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d && docker system prune -f"
+# Build and push Web image to ECR (arm64)
+build-web:
+    docker buildx build --platform linux/arm64 -t {{ECR_REGISTRY}}/hivemind-registry-web:latest --push ./web
 
-# Smoke tests
+# Build and push both images
+build-all: build-api build-web
+
+# SSH to EC2 via Instance Connect (generates ephemeral key, valid ~60s)
+[private]
+ssh-connect cmd:
+    #!/usr/bin/env bash
+    set -e
+    ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q -y 2>/dev/null || true
+    [ -f /tmp/ec2_deploy_key ] || ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q
+    aws ec2-instance-connect send-ssh-public-key \
+      --instance-id "{{EC2_INSTANCE_ID}}" \
+      --instance-os-user ubuntu \
+      --ssh-public-key file:///tmp/ec2_deploy_key.pub
+    ssh -i /tmp/ec2_deploy_key -o StrictHostKeyChecking=no ubuntu@{{EC2_HOST}} "{{cmd}}"
+
+# Deploy: pull latest images on EC2 and restart containers
+deploy:
+    #!/usr/bin/env bash
+    set -e
+    ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q 2>/dev/null || true
+    aws ec2-instance-connect send-ssh-public-key \
+      --instance-id "{{EC2_INSTANCE_ID}}" \
+      --instance-os-user ubuntu \
+      --ssh-public-key file:///tmp/ec2_deploy_key.pub
+    ssh -i /tmp/ec2_deploy_key -o StrictHostKeyChecking=no ubuntu@{{EC2_HOST}} \
+      "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin {{ECR_REGISTRY}} && \
+       cd /opt/hivemind-registry && \
+       docker compose -f docker-compose.prod.yml --env-file .env.prod pull api web && \
+       docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-deps api web && \
+       docker image prune -f"
+
+# Build, push, and deploy everything
+ship: build-all deploy smoke
+
+# Smoke tests against production
 smoke:
-    curl -f http://$$EC2_HOST/api/v1/packages || exit 1
-    curl -f http://$$EC2_HOST/api/v1/stats || exit 1
-    curl -f http://$$EC2_HOST/ || exit 1
-    @echo "Smoke tests passed!"
+    #!/usr/bin/env bash
+    set -e
+    echo "Running smoke tests against https://registry.hivemind.rithul.dev ..."
+    curl -sf https://registry.hivemind.rithul.dev/api/v1/packages > /dev/null
+    echo "  ✓ API packages endpoint"
+    curl -sf https://registry.hivemind.rithul.dev/auth/jwks > /dev/null
+    echo "  ✓ JWKS endpoint"
+    curl -sf https://registry.hivemind.rithul.dev/ > /dev/null
+    echo "  ✓ Frontend"
+    curl -sf https://hivemind.rithul.dev/ > /dev/null
+    echo "  ✓ Docs site"
+    echo "All smoke tests passed!"
 
+# View production logs (last 50 lines)
+logs service="api":
+    #!/usr/bin/env bash
+    set -e
+    ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q 2>/dev/null || true
+    aws ec2-instance-connect send-ssh-public-key \
+      --instance-id "{{EC2_INSTANCE_ID}}" \
+      --instance-os-user ubuntu \
+      --ssh-public-key file:///tmp/ec2_deploy_key.pub
+    ssh -i /tmp/ec2_deploy_key -o StrictHostKeyChecking=no ubuntu@{{EC2_HOST}} \
+      "docker logs hivemind-registry-{{service}}-1 --tail 50"
+
+# Open SSH session to EC2
+ssh:
+    #!/usr/bin/env bash
+    set -e
+    ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q 2>/dev/null || true
+    aws ec2-instance-connect send-ssh-public-key \
+      --instance-id "{{EC2_INSTANCE_ID}}" \
+      --instance-os-user ubuntu \
+      --ssh-public-key file:///tmp/ec2_deploy_key.pub
+    ssh -i /tmp/ec2_deploy_key -o StrictHostKeyChecking=no ubuntu@{{EC2_HOST}}
+
+# Run production DB query
+db-query query:
+    #!/usr/bin/env bash
+    set -e
+    ssh-keygen -t ed25519 -f /tmp/ec2_deploy_key -N "" -q 2>/dev/null || true
+    aws ec2-instance-connect send-ssh-public-key \
+      --instance-id "{{EC2_INSTANCE_ID}}" \
+      --instance-os-user ubuntu \
+      --ssh-public-key file:///tmp/ec2_deploy_key.pub
+    ssh -i /tmp/ec2_deploy_key -o StrictHostKeyChecking=no ubuntu@{{EC2_HOST}} \
+      "docker exec hivemind-registry-postgres-1 psql -U registry -d hivemind_registry -c \"{{query}}\""
