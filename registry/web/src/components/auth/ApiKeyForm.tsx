@@ -17,7 +17,8 @@ const schema = z.object({
     }),
 });
 
-type FormData = z.infer<typeof schema>;
+type FormData = z.output<typeof schema>;
+type FormInput = z.input<typeof schema>;
 
 const SCOPE_OPTIONS = [
   { value: "read", label: "Read" },
@@ -37,18 +38,13 @@ export function ApiKeyForm({ onSubmit, onCancel }: ApiKeyFormProps) {
     control,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<FormData>({
+  } = useForm<FormInput>({
+    defaultValues: { name: "", scopes: [], expires_days: undefined },
     resolver: zodResolver(schema),
-    defaultValues: { name: "", scopes: [], expires_days: "" },
   });
 
   return (
-    <form
-      className="space-y-4 max-w-md"
-      onSubmit={handleSubmit(async (data) => {
-        await onSubmit(data);
-      })}
-    >
+    <form onSubmit={handleSubmit((data) => onSubmit(data as unknown as FormData))} className="p-4 space-y-4">
       <div>
         <label className="block font-mono text-xs text-hm-muted mb-1">Name</label>
         <input

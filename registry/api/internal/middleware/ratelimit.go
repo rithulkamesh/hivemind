@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,14 +60,24 @@ func (rl *RateLimiter) allow(key string) bool {
 	return false
 }
 
-// RateLimit returns middleware that limits by request RemoteAddr (or X-Forwarded-For).
+// RateLimit returns middleware that limits by request RemoteAddr (or X-Forwarded-For
+// if TRUSTED_PROXY is set and matches the direct peer).
 func RateLimit(rps int) func(next http.Handler) http.Handler {
 	limiter := NewRateLimiter(rps, rps*2)
+	trustedProxy := os.Getenv("TRUSTED_PROXY")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := r.RemoteAddr
-			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-				key = xff
+			// M8: Only trust X-Forwarded-For when behind a known trusted proxy.
+			if trustedProxy != "" && strings.HasPrefix(r.RemoteAddr, trustedProxy) {
+				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+					// Use the first (leftmost) IP in the chain.
+					if idx := strings.IndexByte(xff, ','); idx > 0 {
+						key = strings.TrimSpace(xff[:idx])
+					} else {
+						key = strings.TrimSpace(xff)
+					}
+				}
 			}
 			if !limiter.allow(key) {
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)

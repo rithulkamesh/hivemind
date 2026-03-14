@@ -36,7 +36,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 };
 var _a, _b, _c, _d, _e, _f, _g;
 import { betterAuth } from "better-auth";
-import { jwt, twoFactor, oneTap, username, admin, organization, haveIBeenPwned, lastLoginMethod } from "better-auth/plugins";
+import { jwt, twoFactor, oneTap, username, admin, organization, haveIBeenPwned, lastLoginMethod, bearer } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import { apiKey } from "@better-auth/api-key";
 import { Pool } from "pg";
@@ -51,12 +51,6 @@ export var auth = betterAuth({
     emailAndPassword: {
         enabled: true,
         requireEmailVerification: true,
-        password: {
-            minLength: 12,
-            requireUppercase: true,
-            requireNumber: true,
-            requireSpecialChar: true,
-        },
     },
     emailVerification: {
         sendVerificationEmail: function (_a) { return __awaiter(void 0, [_a], void 0, function (_b) {
@@ -94,6 +88,7 @@ export var auth = betterAuth({
         },
     },
     plugins: [
+        bearer(),
         jwt(),
         twoFactor({ issuer: "Hivemind Registry" }),
         oneTap({ clientId: (_g = process.env.GOOGLE_CLIENT_ID) !== null && _g !== void 0 ? _g : "" }),
@@ -105,6 +100,14 @@ export var auth = betterAuth({
         lastLoginMethod(),
         apiKey(),
     ],
+    user: {
+        modelName: "users",
+        fields: {
+            emailVerified: "email_verified",
+            createdAt: "created_at",
+            updatedAt: "updated_at",
+        },
+    },
     session: {
         expiresIn: 60 * 60 * 24 * 7, // 7 days
         cookieCache: {
@@ -117,7 +120,4 @@ export var auth = betterAuth({
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ].filter(function (o, i, a) { return a.indexOf(o) === i; }),
-    advanced: {
-        generateId: function () { return crypto.randomUUID(); },
-    },
 });

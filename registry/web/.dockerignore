@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+*.md
+node_modules/
+.next/
+dist/
+.vscode/
+.idea/
+coverage/

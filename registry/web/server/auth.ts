@@ -17,12 +17,6 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
-    password: {
-      minLength: 12,
-      requireUppercase: true,
-      requireNumber: true,
-      requireSpecialChar: true,
-    },
   },
 
   emailVerification: {
@@ -88,7 +82,4 @@ export const auth = betterAuth({
     "http://127.0.0.1:3000",
   ].filter((o, i, a) => a.indexOf(o) === i),
 
-  advanced: {
-    generateId: () => crypto.randomUUID(),
-  },
 });

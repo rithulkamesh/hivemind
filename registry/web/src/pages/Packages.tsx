@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { api, apiRoutes } from "@/lib/api";
 import type { Package } from "@/types";
 import { PackageCard } from "@/components/packages/PackageCard";
@@ -10,7 +9,6 @@ import { Button } from "@/components/ui/button";
 export function Packages() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = parseInt(searchParams.get("page") ?? "1", 10);
-  const [totalPages, setTotalPages] = useState(1);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["packages", page],

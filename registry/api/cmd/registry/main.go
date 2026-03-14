@@ -76,7 +76,7 @@ func main() {
 	r.Use(chimiddleware.RealIP)
 	r.Use(middleware.Logger(log.Logger))
 	r.Use(middleware.Recover)
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORSWithAllowlist(cfg.BaseURL, cfg.FrontendURL))
 
 	// Public
 	r.Get("/health", health.Liveness)
@@ -86,11 +86,16 @@ func main() {
 	verifier := packages.NewVerifier(queries, cfg.VerificationWorkers)
 	var store packages.Storage
 	if cfg.S3Bucket != "" {
-		s3Store, err := storage.NewS3(ctx, cfg.S3Region, cfg.S3Bucket, cfg.S3CloudFrontDomain)
+		s3Store, err := storage.NewS3(ctx, cfg.S3Region, cfg.S3Bucket, cfg.S3CloudFrontDomain, cfg.S3Endpoint, cfg.S3PublicEndpoint)
 		if err != nil {
 			log.Warn().Err(err).Msg("S3 not configured; upload and file download disabled")
 		} else {
 			store = s3Store
+			if cfg.S3Endpoint != "" {
+				log.Info().Str("endpoint", cfg.S3Endpoint).Str("bucket", cfg.S3Bucket).Msg("S3 via custom endpoint (MinIO/LocalStack)")
+			} else {
+				log.Info().Str("bucket", cfg.S3Bucket).Str("region", cfg.S3Region).Msg("S3 configured (AWS)")
+			}
 		}
 	}
 	pkgHandler := packages.NewHandler(queries, store, nil, verifier, cfg)
@@ -98,14 +103,20 @@ func main() {
 	r.Get("/simple/{name}/", pkgHandler.SimplePackageIndex)
 	r.Get("/simple/{name}/{filename}", pkgHandler.SimpleFileRedirect)
 
+	deviceAuth := auth.NewDeviceAuthManager(queries, cfg.BaseURL)
+	r.Post("/api/v1/auth/device/request", middleware.DeviceRateLimit.Middleware(http.HandlerFunc(deviceAuth.RequestDeviceCode)).ServeHTTP)
+	r.Post("/api/v1/auth/device/poll", middleware.DeviceRateLimit.Middleware(http.HandlerFunc(deviceAuth.PollDeviceCode)).ServeHTTP)
+
 	// Public API
 	searchHandler := search.NewHandler(queries)
 	r.Get("/api/v1/packages", pkgHandler.ListPackages)
 	dockerHandler := docker.NewHandler(queries)
 	r.Get("/api/v1/packages/{name}/images", dockerHandler.ListImages)
+	r.Get("/api/v1/packages/{name}/versions", pkgHandler.ListVersions)
 	r.Get("/api/v1/packages/{name}", pkgHandler.GetPackage)
 	r.Get("/api/v1/packages/{name}/{version}", pkgHandler.GetVersion)
-	r.Get("/api/v1/search", searchHandler.Search)
+	r.Get("/api/v1/packages/{name}/versions/{version}/status", pkgHandler.GetVersionStatus)
+	r.Get("/api/v1/search", middleware.SearchRateLimit.Middleware(http.HandlerFunc(searchHandler.Search)).ServeHTTP)
 	r.Get("/api/v1/stats", pkgHandler.Stats)
 	webhookHandler := webhooks.NewHandler()
 	r.Post("/webhooks/github", webhookHandler.GitHub)
@@ -140,35 +151,43 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RateLimit(cfg.RateLimitRPS))
 		r.Use(auth.RequireAuth(cfg, queries))
-		r.Get("/api/v1/me", users.NewHandler(queries).GetMe)
-		r.Put("/api/v1/me", users.NewHandler(queries).UpdateMe)
-		r.Post("/api/v1/me/2fa/setup", users.NewHandler(queries).Setup2FA)
-		r.Post("/api/v1/me/2fa/verify", users.NewHandler(queries).Verify2FA)
-		r.Get("/api/v1/me/api-keys", users.NewHandler(queries).ListAPIKeys)
-		r.Post("/api/v1/me/api-keys", users.NewHandler(queries).CreateAPIKey)
-		r.Delete("/api/v1/me/api-keys/{id}", users.NewHandler(queries).RevokeAPIKey)
 
-		r.Post("/api/v1/packages", pkgHandler.CreatePackage)
-		r.Put("/api/v1/packages/{name}", pkgHandler.UpdatePackage)
-		r.Delete("/api/v1/packages/{name}", pkgHandler.DeletePackage)
-		r.Post("/api/v1/packages/upload", pkgHandler.Upload) // Generic upload (Twine/CLI)
-		r.Post("/api/v1/packages/{name}/upload", pkgHandler.Upload)
-		r.Post("/api/v1/packages/{name}/{version}/publish", pkgHandler.Publish)
-		r.Post("/api/v1/packages/{name}/{version}/yank", pkgHandler.Yank)
-		r.Delete("/api/v1/packages/{name}/{version}", pkgHandler.DeleteVersion)
+		// Read-scoped endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireScope("read"))
+			r.Get("/api/v1/me", users.NewHandler(queries).GetMe)
+			r.Put("/api/v1/me", users.NewHandler(queries).UpdateMe)
+			r.Post("/api/v1/me/2fa/setup", users.NewHandler(queries).Setup2FA)
+			r.Post("/api/v1/me/2fa/verify", users.NewHandler(queries).Verify2FA)
+			r.Get("/api/v1/me/api-keys", users.NewHandler(queries).ListAPIKeys)
+			r.Post("/api/v1/me/api-keys", users.NewHandler(queries).CreateAPIKey)
+			r.Delete("/api/v1/me/api-keys/{id}", users.NewHandler(queries).RevokeAPIKey)
+			r.Get("/api/v1/orgs", orgs.NewHandler(queries).ListOrgs)
+			r.Get("/api/v1/orgs/{slug}", orgs.NewHandler(queries).GetOrg)
+			r.Get("/api/v1/orgs/{slug}/members", orgs.NewHandler(queries).ListMembers)
+			r.Get("/api/v1/orgs/{slug}/packages", pkgHandler.ListOrgPackages)
+			r.Get("/api/v1/me/downloads", pkgHandler.MyDownloads)
+			r.Get("/api/v1/packages/{name}/downloads", pkgHandler.PackageDownloads)
+		})
 
-		r.Get("/api/v1/orgs", orgs.NewHandler(queries).ListOrgs)
-		r.Post("/api/v1/orgs", orgs.NewHandler(queries).CreateOrg)
-		r.Get("/api/v1/orgs/{slug}", orgs.NewHandler(queries).GetOrg)
-		r.Put("/api/v1/orgs/{slug}", orgs.NewHandler(queries).UpdateOrg)
-		r.Get("/api/v1/orgs/{slug}/members", orgs.NewHandler(queries).ListMembers)
-		r.Post("/api/v1/orgs/{slug}/members/invite", orgs.NewHandler(queries).InviteMember)
-		r.Delete("/api/v1/orgs/{slug}/members/{userID}", orgs.NewHandler(queries).RemoveMember)
-		r.Put("/api/v1/orgs/{slug}/sso", orgs.NewHandler(queries).ConfigureSSO)
-
-		r.Get("/api/v1/orgs/{slug}/packages", pkgHandler.ListOrgPackages)
-		r.Get("/api/v1/me/downloads", pkgHandler.MyDownloads)
-		r.Get("/api/v1/packages/{name}/downloads", pkgHandler.PackageDownloads)
+		// Publish-scoped endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireScope("publish"))
+			r.Post("/api/v1/auth/device/approve", deviceAuth.ApproveDevice)
+			r.Post("/api/v1/packages", pkgHandler.CreatePackage)
+			r.Put("/api/v1/packages/{name}", pkgHandler.UpdatePackage)
+			r.Delete("/api/v1/packages/{name}", pkgHandler.DeletePackage)
+			r.Post("/api/v1/packages/upload", middleware.UploadRateLimit.Middleware(http.HandlerFunc(pkgHandler.Upload)).ServeHTTP) // Generic upload (Twine/CLI)
+			r.Post("/api/v1/packages/{name}/upload", middleware.UploadRateLimit.Middleware(http.HandlerFunc(pkgHandler.Upload)).ServeHTTP)
+			r.Post("/api/v1/packages/{name}/{version}/publish", pkgHandler.Publish)
+			r.Post("/api/v1/packages/{name}/{version}/yank", pkgHandler.Yank)
+			r.Delete("/api/v1/packages/{name}/{version}", pkgHandler.DeleteVersion)
+			r.Post("/api/v1/orgs", orgs.NewHandler(queries).CreateOrg)
+			r.Put("/api/v1/orgs/{slug}", orgs.NewHandler(queries).UpdateOrg)
+			r.Post("/api/v1/orgs/{slug}/members/invite", orgs.NewHandler(queries).InviteMember)
+			r.Delete("/api/v1/orgs/{slug}/members/{userID}", orgs.NewHandler(queries).RemoveMember)
+			r.Put("/api/v1/orgs/{slug}/sso", orgs.NewHandler(queries).ConfigureSSO)
+		})
 	})
 
 	// Admin (require admin scope/role)

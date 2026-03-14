@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS packages (
     search_vector tsvector GENERATED ALWAYS AS (
         to_tsvector('english', name || ' ' || coalesce(description, ''))
     ) STORED,
-    UNIQUE(namespace, name)
+    UNIQUE NULLS NOT DISTINCT (namespace, name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_packages_search ON packages USING GIN(search_vector);

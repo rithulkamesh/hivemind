@@ -1,0 +1,81 @@
+name: Registry Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'registry/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+          
+      - name: API Tests
+        working-directory: registry/api
+        run: |
+          go mod tidy
+          go test ./...
+          
+      - name: Web Typecheck
+        working-directory: registry/web
+        run: |
+          bun install
+          bun run tsc -b
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        
+      - name: Setup Just
+        uses: extractions/setup-just@v2
+        
+      - name: Build and Push Docker Images
+        working-directory: registry
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          just docker-build
+          
+      - name: Deploy to EC2
+        working-directory: registry
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          echo "${{ secrets.EC2_KEY }}" > ec2_key.pem
+          chmod 600 ec2_key.pem
+          export EC2_KEY_PATH=$(pwd)/ec2_key.pem
+          mkdir -p ~/.ssh
+          ssh-keyscan -H $EC2_HOST >> ~/.ssh/known_hosts
+          just ssh-deploy
+          rm ec2_key.pem
+          
+      - name: Smoke Tests
+        working-directory: registry
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          just smoke

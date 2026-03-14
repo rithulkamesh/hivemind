@@ -39,9 +39,11 @@
     "zustand": "latest"
   },
   "devDependencies": {
-    "@types/express": "latest",
     "@eslint/js": "latest",
+    "@tailwindcss/postcss": "latest",
+    "@types/express": "latest",
     "@types/node": "latest",
+    "@types/pg": "^8.18.0",
     "@types/prismjs": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
@@ -53,7 +55,6 @@
     "globals": "latest",
     "postcss": "latest",
     "tailwindcss": "latest",
-    "@tailwindcss/postcss": "latest",
     "typescript": "latest",
     "typescript-eslint": "latest",
     "vite": "latest"

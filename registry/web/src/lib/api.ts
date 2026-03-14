@@ -72,6 +72,8 @@ export const apiRoutes = {
   deletePackage: (name: string) => `/api/v1/packages/${encodeURIComponent(name)}`,
   version: (name: string, version: string) =>
     `/api/v1/packages/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+  versions: (name: string) =>
+    `/api/v1/packages/${encodeURIComponent(name)}/versions`,
   search: (q: string, page = 1) => `/api/v1/search?q=${encodeURIComponent(q)}&page=${page}`,
   stats: () => "/api/v1/stats",
   packageImages: (name: string) => `/api/v1/packages/${encodeURIComponent(name)}/images`,

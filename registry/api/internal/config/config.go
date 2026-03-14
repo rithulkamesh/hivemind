@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -18,9 +19,11 @@ type Config struct {
 	DatabaseURL string
 
 	// S3 / storage
-	S3Bucket            string
-	S3Region            string
-	S3CloudFrontDomain  string
+	S3Bucket           string
+	S3Region           string
+	S3CloudFrontDomain string
+	S3Endpoint         string // Custom endpoint for MinIO / LocalStack (empty = real AWS)
+	S3PublicEndpoint   string // Public-facing S3 endpoint for presigned URLs (empty = same as S3Endpoint)
 
 	// JWT
 	JWTSecret     string
@@ -34,9 +37,9 @@ type Config struct {
 	GoogleClientSecret string
 
 	// SES
-	SESRegion       string
-	SESFromAddress  string
-	SESReplyTo      string
+	SESRegion      string
+	SESFromAddress string
+	SESReplyTo     string
 
 	// SMTP (e.g. Mailhog in dev: SMTP_HOST=mailhog SMTP_PORT=1025)
 	SMTPHost     string
@@ -65,8 +68,11 @@ type Config struct {
 	RateLimitRPS int
 
 	// Upload / verification
-	MaxUploadSizeMB   int
+	MaxUploadSizeMB     int
 	VerificationWorkers int
+
+	// Environment (e.g. "production", "development")
+	Env string
 }
 
 // Load reads configuration from environment. No config file in production.
@@ -76,6 +82,8 @@ func Load() (*Config, error) {
 		S3Bucket:            getEnv("S3_BUCKET", "hivemind-registry-packages"),
 		S3Region:            getEnv("S3_REGION", "us-east-1"),
 		S3CloudFrontDomain:  getEnv("S3_CLOUDFRONT_DOMAIN", "packages.hivemind.rithul.dev"),
+		S3Endpoint:          getEnv("S3_ENDPOINT", ""),
+		S3PublicEndpoint:    getEnv("S3_PUBLIC_ENDPOINT", ""),
 		JWTSecret:           getEnv("JWT_SECRET", ""),
 		JWTAccessTTL:        parseDuration(getEnv("JWT_ACCESS_TTL", "24h"), 24*time.Hour),
 		JWTRefreshTTL:       parseDuration(getEnv("JWT_REFRESH_TTL", "720h"), 720*time.Hour),
@@ -101,6 +109,7 @@ func Load() (*Config, error) {
 		RateLimitRPS:        getEnvInt("RATE_LIMIT_RPS", 10),
 		MaxUploadSizeMB:     getEnvInt("MAX_UPLOAD_SIZE_MB", 100),
 		VerificationWorkers: getEnvInt("VERIFICATION_WORKERS", 4),
+		Env:                 getEnv("ENV", "development"),
 	}
 
 	if c.DatabaseURL == "" {
@@ -111,7 +120,35 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("either JWT_SECRET or JWKS_URL is required")
 	}
 
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+
 	return c, nil
+}
+
+// Validate performs security validation on configuration values.
+// In production, enforces stricter requirements.
+func (c *Config) Validate() error {
+	isProd := c.Env == "production"
+
+	// M1: INTERNAL_SECRET must be at least 32 characters in production.
+	if isProd && len(c.InternalSecret) < 32 {
+		return fmt.Errorf("INTERNAL_SECRET must be at least 32 characters in production (got %d)", len(c.InternalSecret))
+	}
+
+	// H8: JWKS_URL must use HTTPS in production to prevent MITM.
+	if isProd && c.JWKSURL != "" {
+		u, err := url.Parse(c.JWKSURL)
+		if err != nil {
+			return fmt.Errorf("invalid JWKS_URL: %w", err)
+		}
+		if u.Scheme != "https" {
+			return fmt.Errorf("JWKS_URL must use HTTPS in production (got %s)", u.Scheme)
+		}
+	}
+
+	return nil
 }
 
 // GetJWTSecret returns the JWT signing secret for auth middleware.

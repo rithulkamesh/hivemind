@@ -1,11 +1,15 @@
 package packages
 
 import (
+	"archive/zip"
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,6 +21,35 @@ import (
 	"github.com/rithul/hivemind/registry/api/internal/db"
 	"github.com/rithul/hivemind/registry/api/internal/storage"
 )
+
+// validPackageName restricts names to safe alphanumeric + separators, PEP 508 style.
+// Max 128 chars, must start and end with alphanumeric.
+var validPackageName = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
+
+// validVersion restricts version strings to PEP 440-like patterns.
+// Max 64 chars.
+var validVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+(\.[0-9]+)?([a-zA-Z0-9.+_-]*)$`)
+
+// allowedExtensions for uploaded files.
+var allowedExtensions = []string{".whl", ".tar.gz"}
+
+func validatePackageName(name string) bool {
+	return len(name) > 0 && len(name) <= 128 && validPackageName.MatchString(name)
+}
+
+func validateVersion(version string) bool {
+	return len(version) > 0 && len(version) <= 64 && validVersion.MatchString(version)
+}
+
+func hasAllowedExtension(filename string) bool {
+	lower := strings.ToLower(filename)
+	for _, ext := range allowedExtensions {
+		if strings.HasSuffix(lower, ext) {
+			return true
+		}
+	}
+	return false
+}
 
 // Storage provides S3 upload and presigned URLs (optional for read-only).
 type Storage interface {
@@ -83,12 +116,38 @@ func (h *Handler) SimpleFileRedirect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "downloads not configured", http.StatusServiceUnavailable)
 		return
 	}
-	url, err := GetPresignedURLForFile(r.Context(), h.q, name, filename, h.store)
-	if err != nil {
+	info, err := GetPresignedURLForFile(r.Context(), h.q, name, filename, h.store)
+	if err != nil || info == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, url, http.StatusFound)
+
+	// Record download asynchronously so we don't block the redirect.
+	go func() {
+		ctx := context.Background()
+		ipHash := ""
+		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+			ipHash = ip // Could be hashed for privacy; using raw for dev.
+		}
+		ua := r.Header.Get("User-Agent")
+		installer := ""
+		if strings.Contains(ua, "pip/") {
+			installer = "pip"
+		} else if strings.Contains(ua, "uv/") {
+			installer = "uv"
+		}
+		_, _ = h.q.RecordDownloadEvent(ctx, db.RecordDownloadEventParams{
+			FileID:      info.FileID,
+			IpHash:      pgtype.Text{String: ipHash, Valid: ipHash != ""},
+			UserAgent:   pgtype.Text{String: ua, Valid: ua != ""},
+			CountryCode: pgtype.Text{},
+			Installer:   pgtype.Text{String: installer, Valid: installer != ""},
+		})
+		_ = h.q.IncrementFileDownloadCount(ctx, info.FileID)
+		_ = h.q.IncrementPackageDownloadCount(ctx, info.PackageID)
+	}()
+
+	http.Redirect(w, r, info.URL, http.StatusFound)
 }
 
 func (h *Handler) ListPackages(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +172,9 @@ func (h *Handler) ListPackages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if pkgs == nil {
+		pkgs = []db.Package{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"packages": pkgs, "page": page})
 }
@@ -131,6 +193,28 @@ func (h *Handler) GetPackage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(pkg)
 }
 
+func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	name := NormalizeName(chi.URLParam(r, "name"))
+	pkg, err := h.q.GetPackageByNamespaceName(r.Context(), db.GetPackageByNamespaceNameParams{
+		Namespace: pgtype.Text{},
+		Name:      name,
+	})
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	versions, err := h.q.ListVersionsForPackage(r.Context(), pkg.ID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if versions == nil {
+		versions = []db.PackageVersion{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"versions": versions})
+}
+
 func (h *Handler) GetVersion(w http.ResponseWriter, r *http.Request) {
 	name := NormalizeName(chi.URLParam(r, "name"))
 	version := chi.URLParam(r, "version")
@@ -145,6 +229,40 @@ func (h *Handler) GetVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(pv)
+}
+
+func (h *Handler) GetVersionStatus(w http.ResponseWriter, r *http.Request) {
+	name := NormalizeName(chi.URLParam(r, "name"))
+	version := chi.URLParam(r, "version")
+
+	var ns pgtype.Text
+	pv, err := h.q.GetPackageVersion(r.Context(), db.GetPackageVersionParams{
+		Namespace: ns,
+		Name:      name,
+		Version:   version,
+	})
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	res := map[string]interface{}{
+		"version":             pv.Version,
+		"verification_status": pv.VerificationStatus.String,
+		"published":           pv.Published.Bool,
+		"tool_count":          pv.ToolCount.Int32,
+		"verification_report": nil,
+	}
+
+	if pv.VerificationReport != nil {
+		var report interface{}
+		if err := json.Unmarshal(pv.VerificationReport, &report); err == nil {
+			res["verification_report"] = report
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
 }
 
 func (h *Handler) Stats(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +291,7 @@ func (h *Handler) CreatePackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := NormalizeName(req.Name)
-	if name == "" {
+	if name == "" || !validatePackageName(name) {
 		http.Error(w, "invalid name", http.StatusBadRequest)
 		return
 	}
@@ -225,11 +343,16 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		// Fallback for generic upload endpoint (Twine/CLI)
 		name = NormalizeName(r.FormValue("name"))
 	}
-	if name == "" {
+	if name == "" || !validatePackageName(name) {
 		http.Error(w, "invalid package name", http.StatusBadRequest)
 		return
 	}
+
+	// H3: Enforce body size limit before parsing multipart form to prevent
+	// disk exhaustion (ParseMultipartForm only limits in-memory buffering).
 	maxBytes := int64(h.cfg.MaxUploadSizeMB) * 1024 * 1024
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+
 	if err := r.ParseMultipartForm(maxBytes); err != nil {
 		http.Error(w, "failed to parse form or file too large", http.StatusBadRequest)
 		return
@@ -237,6 +360,11 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	version := strings.TrimSpace(r.FormValue("version"))
 	if version == "" {
 		http.Error(w, "version required", http.StatusBadRequest)
+		return
+	}
+	// H2: Validate version string format.
+	if !validateVersion(version) {
+		http.Error(w, "invalid version format", http.StatusBadRequest)
 		return
 	}
 	file, header, err := r.FormFile("file")
@@ -249,15 +377,30 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	defer file.Close()
+
+	// H4: Only allow .whl and .tar.gz extensions.
+	filename := header.Filename
+	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
+	if !hasAllowedExtension(filename) {
+		http.Error(w, "invalid file extension: only .whl and .tar.gz allowed", http.StatusBadRequest)
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(file, maxBytes))
 	if err != nil {
 		http.Error(w, "failed to read file", http.StatusInternalServerError)
 		return
 	}
-	filename := header.Filename
-	if filename == "" || strings.Contains(filename, "/") || strings.Contains(filename, "..") {
-		http.Error(w, "invalid filename", http.StatusBadRequest)
-		return
+
+	// M7: Validate .whl files are valid ZIP archives.
+	if strings.HasSuffix(strings.ToLower(filename), ".whl") {
+		if _, err := zip.NewReader(bytes.NewReader(body), int64(len(body))); err != nil {
+			http.Error(w, "invalid .whl file: not a valid zip archive", http.StatusBadRequest)
+			return
+		}
 	}
 	var ns pgtype.Text
 	pkg, err := h.q.GetPackageByNamespaceName(r.Context(), db.GetPackageByNamespaceNameParams{Namespace: ns, Name: name})

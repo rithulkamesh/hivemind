@@ -3,9 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,13 +44,11 @@ func RequireAuth(cfg AuthConfig, q *db.Queries) func(next http.Handler) http.Han
 				if jwks := GetGlobalJWKSVerifier(); jwks != nil {
 					claims, err := jwks.Verify(tokenString)
 					if err != nil {
-						fmt.Printf("JWKS Verify Error: %v\n", err) // DEBUG LOG
 						writeAuthError(w, "unauthorized", http.StatusUnauthorized)
 						return
 					}
 					uid, err := uuid.Parse(claims.Subject) // sub = Better Auth user ID
 					if err != nil {
-						fmt.Printf("UUID Parse Error for subject %s: %v\n", claims.Subject, err) // DEBUG LOG
 						writeAuthError(w, "unauthorized", http.StatusUnauthorized)
 						return
 					}
@@ -88,23 +86,26 @@ func RequireAuth(cfg AuthConfig, q *db.Queries) func(next http.Handler) http.Han
 			}
 
 			if rawKey != "" {
-				// We have an API key (from header or Basic Auth password)
-				// Check if it's "hm_..." format? Typically yes.
-				// But we just hash it and look up.
-				// However, the hash function expects the raw key.
-				// The provided instruction says "hash := HashKey(rawKey)".
-				// We need to implement HashKey or find where it is.
-				// It seems HashKey is not imported or defined in this file?
-				// Wait, line 82: hash := HashKey(rawKey) is in the existing code.
-				// So HashKey must be defined in this package (auth).
+				// Early prefix check: reject keys that don't start with "hm_" before
+				// wasting a hash+DB round-trip on garbage input.
+				if !strings.HasPrefix(rawKey, KeyPrefix) {
+					writeAuthError(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
 
-				// Let's use the same logic as existing X-API-Key block.
 				hash := HashKey(rawKey)
 				key, err := q.GetAPIKeyByHash(r.Context(), hash)
 				if err != nil {
 					writeAuthError(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
+
+				// C5: Check API key expiry (DB query checks revoked but NOT expires_at).
+				if key.ExpiresAt.Valid && time.Now().After(key.ExpiresAt.Time) {
+					writeAuthError(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+
 				ctx := context.WithValue(r.Context(), ContextKeyUserID, key.UserID)
 				ctx = context.WithValue(ctx, ContextKeyUsername, "")
 				ctx = context.WithValue(ctx, ContextKeyScopes, key.Scopes)
@@ -125,10 +126,16 @@ func writeAuthError(w http.ResponseWriter, message string, code int) {
 }
 
 // RequireScope ensures the request has the given scope (API key scopes or admin for JWT session).
+// JWT sessions (no API key ID in context) are treated as having all scopes.
 // On failure responds with 403 JSON {"error": "insufficient_scope"}.
 func RequireScope(scope string) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// JWT sessions (Better Auth or legacy) bypass scope checks — they have full access.
+			if _, hasKey := r.Context().Value(ContextKeyAPIKeyID).(uuid.UUID); !hasKey {
+				next.ServeHTTP(w, r)
+				return
+			}
 			scopes, _ := r.Context().Value(ContextKeyScopes).([]string)
 			for _, s := range scopes {
 				if s == scope {

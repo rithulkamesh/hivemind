@@ -10,6 +10,7 @@ import { Login } from "@/pages/Login";
 import { Register } from "@/pages/Register";
 import { VerifyEmail } from "@/pages/VerifyEmail";
 import { ErrorPage } from "@/pages/ErrorPage";
+import { Activate } from "@/pages/Activate";
 import { Dashboard } from "@/pages/Dashboard";
 import { DashboardPackages } from "@/pages/Dashboard/Packages";
 import { CreatePackage } from "@/pages/Dashboard/CreatePackage";
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="register" element={<GuestGuard><Register /></GuestGuard>} />
         <Route path="verify-email" element={<VerifyEmail />} />
         <Route path="error" element={<ErrorPage />} />
+        <Route path="activate" element={<AuthGuard><Activate /></AuthGuard>} />
 
         <Route path="dashboard" element={<AuthGuard><Dashboard /></AuthGuard>} />
         <Route path="dashboard/packages" element={<AuthGuard><DashboardPackages /></AuthGuard>} />

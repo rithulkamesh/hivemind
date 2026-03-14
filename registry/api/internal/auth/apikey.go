@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 )
@@ -31,8 +32,10 @@ func HashKey(raw string) string {
 }
 
 // VerifyAPIKey returns true if rawKey hashes to storedHash.
+// Uses constant-time comparison to prevent timing attacks.
 func VerifyAPIKey(rawKey, storedHash string) bool {
-	return HashKey(rawKey) == storedHash
+	computed := HashKey(rawKey)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(storedHash)) == 1
 }
 
 // ExtractBearerKey returns the key from "Bearer hm_xxx" or empty.

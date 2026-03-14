@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
@@ -38,20 +37,18 @@ func NewJWKSVerifier(ctx context.Context, jwksURL string) (*JWKSVerifier, error)
 }
 
 // Verify parses and verifies the token string using JWKS and returns claims.
+// Algorithm is pinned to RS256 and ES256 to prevent algorithm confusion attacks.
 func (v *JWKSVerifier) Verify(tokenString string) (*JWKSClaims, error) {
-	fmt.Printf("Verifying token against JWKS. Token len: %d\n", len(tokenString))
-	token, err := jwt.ParseWithClaims(tokenString, &JWKSClaims{}, v.jwks.Keyfunc)
+	token, err := jwt.ParseWithClaims(tokenString, &JWKSClaims{}, v.jwks.Keyfunc,
+		jwt.WithValidMethods([]string{"RS256", "ES256"}),
+	)
 	if err != nil {
-		fmt.Printf("JWT Parse Error: %v\n", err)
 		return nil, err
 	}
 	claims, ok := token.Claims.(*JWKSClaims)
 	if !ok || !token.Valid {
-		fmt.Printf("Invalid Token Claims or !token.Valid\n")
 		return nil, fmt.Errorf("invalid token claims")
 	}
-	// Optional: check expiry is already validated by jwt.ParseWithClaims
-	_ = time.Now()
 	return claims, nil
 }
 

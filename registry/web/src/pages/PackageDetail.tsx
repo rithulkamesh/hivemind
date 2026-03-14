@@ -33,8 +33,8 @@ export function PackageDetail() {
   const { data: versions } = useQuery({
     queryKey: ["package", name, "versions"],
     queryFn: async () => {
-      await api<Package>(apiRoutes.package(name!));
-      return api<PackageVersion[]>(`/api/v1/packages/${encodeURIComponent(name!)}/versions`).catch(() => []);
+      const res = await api<{ versions: PackageVersion[] }>(apiRoutes.versions(name!)).catch(() => ({ versions: [] }));
+      return res.versions;
     },
     enabled: !!name && !!pkg,
   });

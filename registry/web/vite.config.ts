@@ -15,7 +15,7 @@ export default defineConfig({
           try {
             console.log("[Vite] Handling /auth/token request");
             // Import auth dynamically to avoid build-time issues
-            const { auth } = await import("./server/auth.ts");
+            const { auth } = await import("./server/auth");
             const session = await auth.api.getSession({ headers: req.headers as HeadersInit });
             
             if (!session) {
@@ -91,8 +91,8 @@ export default defineConfig({
               }
               const data = JSON.parse(body || "{}");
               // ...
-              const { auth } = await import("./server/auth.ts");
-              await auth.api.setPassword({ body: { newPassword }, headers: req.headers as HeadersInit });
+              const { auth } = await import("./server/auth");
+              await auth.api.setPassword({ body: { newPassword: data.newPassword }, headers: req.headers as HeadersInit });
               res.writeHead(200, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ success: true }));
             } catch (err) {
@@ -104,7 +104,7 @@ export default defineConfig({
         });
         server.middlewares.use(async (req, res, next) => {
           if (!req.url?.startsWith("/auth")) return next();
-          const { auth } = await import("./server/auth.ts");
+          const { auth } = await import("./server/auth");
           const handler = toNodeHandler(auth);
           handler(req, res);
         });

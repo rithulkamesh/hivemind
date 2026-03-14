@@ -2,6 +2,11 @@
 # API and simple index -> Go; everything else (SPA + /auth) -> web (Node server serving static + Better Auth).
 
 registry.hivemind.rithul.dev {
+    # M6: Block external access to internal endpoints.
+    handle /internal/* {
+        respond "Not Found" 404
+    }
+
     handle /api/* {
         reverse_proxy api:8080
     }
@@ -19,11 +24,13 @@ registry.hivemind.rithul.dev {
     }
 
     header {
-        Strict-Transport-Security "max-age=31536000; includeSubdomains"
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.github.com https://registry.hivemind.rithul.dev"
+        -Server
     }
 
     log {

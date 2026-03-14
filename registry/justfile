@@ -5,20 +5,27 @@
 
 set dotenv-load
 
-# Start Postgres in Docker. Then run: just dev
+# Start Postgres + Mailhog + MinIO in Docker. Then run: just dev
 deps:
-    docker compose -f docker-compose.dev.yml up postgres -d
+    docker compose -f docker-compose.dev.yml up postgres mailhog minio createbuckets -d
     @echo "Waiting for postgres..."
     sleep 3
-    @echo "Deps up. Run: just dev  (API + web in one terminal, Ctrl+C kills all)"
+    @echo "Deps up (postgres, mailhog, minio). Run: just dev  (API + web in one terminal, Ctrl+C kills all)"
 
 # Run API (air) + Web (Vite + Better Auth). Ctrl+C kills all. Requires .env with DATABASE_URL.
 dev: deps
     #!/usr/bin/env bash
     set -e
-    if [ -z "$${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env and set it."; exit 1; fi
-    trap 'kill $(jobs -p) 2>/dev/null; exit 130' INT TERM
+    if [ -z "${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env and set it."; exit 1; fi
+    trap 'kill $(jobs -p) 2>/dev/null; exit 0' INT TERM
     (cd api && air) &
+    # Wait for API to be ready before starting web
+    echo "Waiting for API on :8080..."
+    for i in $(seq 1 30); do
+      if curl -sf http://localhost:8080/health >/dev/null 2>&1; then break; fi
+      sleep 1
+    done
+    echo "API ready."
     (cd web && ( [ -d node_modules ] || bun install ) && exec bun run dev) &
     wait
 
@@ -42,7 +49,7 @@ auth-migrate:
     set -e
     cd "{{ justfile_directory() }}"
     [ -f .env ] && set -a && source .env && set +a
-    if [ -z "$${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env in registry/."; exit 1; fi
+    if [ -z "${DATABASE_URL:-}" ]; then echo "Error: DATABASE_URL not set. Copy .env.example to .env in registry/."; exit 1; fi
     cd web && npx auth@latest migrate --config ./server/auth.ts --yes
 
 # Full stack in Docker (postgres + api + web). No host watch.
@@ -56,3 +63,27 @@ test-plugin-build:
 # Install test plugin from local registry (registry must be up and package uploaded or seeded)
 test-plugin-install:
     pip install --index-url http://localhost:3000/simple/ hivemind-plugin-demo
+
+# Build images and push to ECR
+docker-build:
+    docker build -t registry-api ./api
+    docker build -t registry-web ./web
+    docker tag registry-api $$ECR_REGISTRY/registry-api:latest
+    docker tag registry-web $$ECR_REGISTRY/registry-web:latest
+    docker push $$ECR_REGISTRY/registry-api:latest
+    docker push $$ECR_REGISTRY/registry-web:latest
+
+# Trigger deploy on EC2
+deploy: docker-build ssh-deploy
+
+# SSH and deploy
+ssh-deploy:
+    ssh -o StrictHostKeyChecking=no -i $$EC2_KEY_PATH $$EC2_USER@$$EC2_HOST "aws ecr get-login-password --region $$AWS_REGION | docker login --username AWS --password-stdin $$ECR_REGISTRY && cd /opt/registry && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d && docker system prune -f"
+
+# Smoke tests
+smoke:
+    curl -f http://$$EC2_HOST/api/v1/packages || exit 1
+    curl -f http://$$EC2_HOST/api/v1/stats || exit 1
+    curl -f http://$$EC2_HOST/ || exit 1
+    @echo "Smoke tests passed!"
+

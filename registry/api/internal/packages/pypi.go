@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rithul/hivemind/registry/api/internal/db"
@@ -148,15 +149,22 @@ func escapeHTML(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;").Replace(s)
 }
 
-// GetPresignedURLForFile finds the file by package name and filename and returns a presigned download URL.
-func GetPresignedURLForFile(ctx context.Context, q *db.Queries, name, filename string, store Storage) (string, error) {
+// FileDownloadInfo contains the presigned URL and identifiers needed for download tracking.
+type FileDownloadInfo struct {
+	URL       string
+	FileID    uuid.UUID
+	PackageID uuid.UUID
+}
+
+// GetPresignedURLForFile finds the file by package name and filename and returns download info.
+func GetPresignedURLForFile(ctx context.Context, q *db.Queries, name, filename string, store Storage) (*FileDownloadInfo, error) {
 	pkg, err := q.GetPackageByNamespaceName(ctx, db.GetPackageByNamespaceNameParams{Name: name})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	vers, err := q.ListVersionsForPackage(ctx, pkg.ID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, pv := range vers {
 		f, err := q.GetPackageFileByVersionAndFilename(ctx, db.GetPackageFileByVersionAndFilenameParams{
@@ -166,7 +174,11 @@ func GetPresignedURLForFile(ctx context.Context, q *db.Queries, name, filename s
 		if err != nil {
 			continue
 		}
-		return store.PresignedDownloadURL(f.S3Key)
+		url, err := store.PresignedDownloadURL(f.S3Key)
+		if err != nil {
+			return nil, err
+		}
+		return &FileDownloadInfo{URL: url, FileID: f.ID, PackageID: pkg.ID}, nil
 	}
-	return "", nil
+	return nil, nil
 }

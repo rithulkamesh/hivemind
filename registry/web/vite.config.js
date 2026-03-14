@@ -46,6 +46,118 @@ export default defineConfig({
             name: "better-auth",
             configureServer: function (server) {
                 var _this = this;
+                // Handle /auth/token (GET) to return JWT for Go API
+                server.middlewares.use("/auth/token", function (req, res, next) { return __awaiter(_this, void 0, void 0, function () {
+                    var auth, session, token, scopes, payload, result, err_1, e_1;
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0:
+                                if (req.method !== "GET")
+                                    return [2 /*return*/, next()];
+                                _a.label = 1;
+                            case 1:
+                                _a.trys.push([1, 10, , 11]);
+                                console.log("[Vite] Handling /auth/token request");
+                                return [4 /*yield*/, import("./server/auth")];
+                            case 2:
+                                auth = (_a.sent()).auth;
+                                return [4 /*yield*/, auth.api.getSession({ headers: req.headers })];
+                            case 3:
+                                session = _a.sent();
+                                if (!session) {
+                                    console.log("[Vite] No session found");
+                                    res.writeHead(401, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({ error: "Unauthorized" }));
+                                    return [2 /*return*/];
+                                }
+                                console.log("[Vite] Session found for user:", session.user.email);
+                                token = session.session.token;
+                                if (!auth.api.signJWT) return [3 /*break*/, 8];
+                                _a.label = 4;
+                            case 4:
+                                _a.trys.push([4, 6, , 7]);
+                                scopes = [];
+                                // @ts-ignore
+                                if (session.user.role === "admin") {
+                                    scopes.push("admin");
+                                }
+                                payload = {
+                                    sub: session.user.id,
+                                    email: session.user.email,
+                                    name: session.user.name,
+                                    scopes: scopes,
+                                    // Standard claims
+                                    iat: Math.floor(Date.now() / 1000),
+                                    exp: Math.floor(Date.now() / 1000) + (60 * 60), // 1 hour
+                                };
+                                console.log("[Vite] Signing JWT with payload:", JSON.stringify(payload));
+                                return [4 /*yield*/, auth.api.signJWT({ body: { payload: payload } })];
+                            case 5:
+                                result = _a.sent();
+                                // @ts-ignore
+                                token = result.token;
+                                console.log("[Vite] JWT signed successfully");
+                                return [3 /*break*/, 7];
+                            case 6:
+                                err_1 = _a.sent();
+                                console.error("[Vite] Error signing JWT:", err_1);
+                                return [3 /*break*/, 7];
+                            case 7: return [3 /*break*/, 9];
+                            case 8:
+                                console.log("[Vite] auth.api.signJWT method NOT found");
+                                _a.label = 9;
+                            case 9:
+                                res.writeHead(200, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({ token: token }));
+                                return [3 /*break*/, 11];
+                            case 10:
+                                e_1 = _a.sent();
+                                console.error("[Vite] Error in /auth/token:", e_1);
+                                next(e_1);
+                                return [3 /*break*/, 11];
+                            case 11: return [2 /*return*/];
+                        }
+                    });
+                }); });
+                // Handle set-password first (must run before catch-all /auth handler).
+                server.middlewares.use("/auth/set-password", function (req, res, next) {
+                    if (req.method !== "POST")
+                        return next();
+                    // Log that we hit this
+                    console.log("Handling /auth/set-password");
+                    var body = "";
+                    req.on("data", function (chunk) { body += chunk; });
+                    req.on("end", function () { return __awaiter(_this, void 0, void 0, function () {
+                        var data, auth, err_2;
+                        return __generator(this, function (_a) {
+                            switch (_a.label) {
+                                case 0:
+                                    _a.trys.push([0, 3, , 4]);
+                                    if (!body) {
+                                        // Try to read from req.body if parsed?
+                                        // But in vite dev server, it's raw.
+                                    }
+                                    data = JSON.parse(body || "{}");
+                                    return [4 /*yield*/, import("./server/auth")];
+                                case 1:
+                                    auth = (_a.sent()).auth;
+                                    return [4 /*yield*/, auth.api.setPassword({ body: { newPassword: data.newPassword }, headers: req.headers })];
+                                case 2:
+                                    _a.sent();
+                                    res.writeHead(200, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({ success: true }));
+                                    return [3 /*break*/, 4];
+                                case 3:
+                                    err_2 = _a.sent();
+                                    console.error("set-password error", err_2);
+                                    res.writeHead(400, { "Content-Type": "application/json" });
+                                    res.end(JSON.stringify({ error: err_2 instanceof Error ? err_2.message : "Failed to set password" }));
+                                    return [3 /*break*/, 4];
+                                case 4: return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                });
                 server.middlewares.use(function (req, res, next) { return __awaiter(_this, void 0, void 0, function () {
                     var auth, handler;
                     var _a;
@@ -54,7 +166,7 @@ export default defineConfig({
                             case 0:
                                 if (!((_a = req.url) === null || _a === void 0 ? void 0 : _a.startsWith("/auth")))
                                     return [2 /*return*/, next()];
-                                return [4 /*yield*/, import("./server/auth.ts")];
+                                return [4 /*yield*/, import("./server/auth")];
                             case 1:
                                 auth = (_b.sent()).auth;
                                 handler = toNodeHandler(auth);

@@ -21,7 +21,7 @@ class DemoEchoTool(Tool):
 
 
 def load():
-    """Plugin entry point: register tools and return their names."""
+    """Plugin entry point: register tools and return Tool instances."""
     tool = DemoEchoTool()
     register(tool)
-    return [tool.name]
+    return [tool]

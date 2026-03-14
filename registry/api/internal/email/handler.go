@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -38,7 +39,7 @@ type SendRequest struct {
 func (h *InternalHandler) RequireInternalSecret(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret := strings.TrimSpace(r.Header.Get(internalSecretHeader))
-		if h.Secret == "" || secret != h.Secret {
+		if h.Secret == "" || len(secret) == 0 || subtle.ConstantTimeCompare([]byte(secret), []byte(h.Secret)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})

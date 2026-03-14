@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+*.md
+*.test
+vendor/
+tmp/
+.vscode/
+.idea/
+**/*_test.go
