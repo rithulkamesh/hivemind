@@ -30,13 +30,18 @@ var (
 )
 
 // Pool returns a shared pgxpool.Pool for the test database.
-// Calls t.Fatal if connection fails.
+// Calls t.Fatal if connection fails.  Runs migrations once on first call
+// so that tables exist even in a fresh CI Postgres container.
 func Pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	poolOnce.Do(func() {
 		url := os.Getenv("DATABASE_URL")
 		if url == "" {
 			url = defaultDatabaseURL
+		}
+		if err := db.RunMigrations(context.Background(), url); err != nil {
+			poolErr = fmt.Errorf("run migrations: %w", err)
+			return
 		}
 		pool, poolErr = pgxpool.New(context.Background(), url)
 	})
