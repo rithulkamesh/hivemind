@@ -1,8 +1,11 @@
-# Caddyfile for registry.hivemind.rithul.dev
-# API and simple index -> Go; everything else (SPA + /auth) -> web (Node server serving static + Better Auth).
+# Caddyfile for hivemind services
+# - registry.hivemind.rithul.dev: API + Web (reverse proxy)
+# - hivemind.rithul.dev: Docs (static files)
+
+# ── Registry ─────────────────────────────────────────────────────────────
 
 registry.hivemind.rithul.dev {
-    # M6: Block external access to internal endpoints.
+    # Block external access to internal endpoints.
     handle /internal/* {
         respond "Not Found" 404
     }
@@ -35,6 +38,33 @@ registry.hivemind.rithul.dev {
 
     log {
         output file /var/log/caddy/access.log
+        format json
+    }
+}
+
+# ── Docs ─────────────────────────────────────────────────────────────────
+
+hivemind.rithul.dev {
+    root * /srv/docs
+    file_server
+
+    # SPA fallback for Docusaurus client-side routing
+    try_files {path} /index.html
+
+    # Cache static assets aggressively
+    @assets path /assets/* /img/*
+    header @assets Cache-Control "public, max-age=31536000, immutable"
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/docs-access.log
         format json
     }
 }

@@ -66,6 +66,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      - /opt/hivemind-docs:/srv/docs:ro
     depends_on:
       - api
       - web
